@@ -1,0 +1,11 @@
+librosa
+matplotlib
+tensorboard
+torch
+wandb
+phonemizer
+unidecode
+tqdm
+hgtk
+pysptk
+transformers

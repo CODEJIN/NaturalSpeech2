@@ -1,0 +1,175 @@
+Sound:
+    N_FFT: 1024
+    Mel_Dim: 80
+    Frame_Length: 1024
+    Frame_Shift: 256
+    Sample_Rate: 22050
+    F0_Min: 65
+    F0_Max: 2094
+
+Tokens: 55
+GE2E_Size: 256
+
+Encoder:
+    Size: 512
+    Transformer:
+        Stack: 6
+        Head: 8
+        Dropout_Rate: 0.0
+        FFN:
+            Kernel_Size: 9
+            Dropout_Rate: 0.2
+
+Speech_Prompter:
+    Size: 512
+    Transformer:
+        Stack: 6
+        Head: 8
+        Dropout_Rate: 0.0
+        FFN:
+            Kernel_Size: 9
+            Dropout_Rate: 0.2
+
+
+
+Duration_Predictor:
+    Kernel_Size: 3
+    Conv_Stack: 3
+    Flow_Stack: 4
+    Dropout_Rate: 0.5
+
+F0_Predictor:
+    Stack: 6
+    Kernel_Size: 17
+    LeakyRelu_Negative_Slope: 0.1
+    Dropout_Rate: 0.3
+
+
+Diffusion:
+    Max_Step: 1000
+    Size: 512   # == Audio_Codec.Size * 2
+    Kernel_Size: 5
+    Stack: 10
+    WaveNet:
+        Calc_Channels: 1024
+        Conv_Stack: 4
+        Kernel_Size: 3        
+        Dilation_Rate: 2
+        Dropout_Rate: 0.2
+    Attention:
+        Head: 8
+        Dropout_Rate: 0.0
+
+Audio_Codec:
+    Size: 256
+    Num_Query_Token: 32
+    Encoder:
+        Kernel_Size:
+            Initial: 7
+            Last: 3
+        Channels: [32, 64, 128, 256]
+        Strides: [2, 4, 5, 5]
+    Residual_VQ:
+        Stack: 16
+        Num_Codebook: 1024
+    Decoder:
+        Kernel_Size:
+            Initial: 7
+            Last: 7
+        Channels: [128, 64, 32, 1]
+        Strides: [5, 5, 4, 2]
+
+
+
+Token_Path: 'D:/Datasets/22K.VCTK/Token.yaml'
+GE2E_Path: 'D:/Datasets/22K.VCTK/GE2E.pickle'
+Spectrogram_Range_Info_Path: 'D:/Datasets/22K.VCTK/Spectrogram_Range_Info.yaml'
+Mel_Range_Info_Path: 'D:/Datasets/22K.VCTK/Mel_Range_Info.yaml'
+F0_Info_Path: 'D:/Datasets/22K.VCTK/F0_Info.yaml'
+Energy_Info_Path: 'D:/Datasets/22K.VCTK/Energy_Info.yaml'
+Speaker_Info_Path: 'D:/Datasets/22K.VCTK/Speaker_Info.yaml'
+Emotion_Info_Path: 'D:/Datasets/22K.VCTK/Emotion_Info.yaml'
+Language_Info_Path: 'D:/Datasets/22K.VCTK/Language_Info.yaml'
+Gender_Info_Path: 'D:/Datasets/22K.VCTK/Gender_Info.yaml'
+Language_and_Gender_Info_by_Speaker_Path: 'D:/Datasets/22K.VCTK/Language_and_Gender_Info_by_Speaker.yaml'
+Train:
+    Pattern_Cache: false
+    Train_Pattern:
+        Path: 'D:/Datasets/22K.VCTK/Train'
+        Metadata_File: 'METADATA.PICKLE'
+        Feature_Length:
+            Min: 50
+            Max: 1200
+        Text_Length:
+            Min: 1
+            Max: 200
+        Accumulated_Dataset_Epoch: 1 # This is to prevent slow down from torch.utils.data.DataLoader when the number of patterns is small.
+        Augmentation_Ratio: 0.10
+    Eval_Pattern:
+        Path: 'D:/Datasets/22K.VCTK/Eval'
+        Metadata_File: 'METADATA.PICKLE'
+        Feature_Length:
+            Min: 50
+            Max: 1200
+        Text_Length:
+            Min: 10
+            Max: 200
+    Num_Workers: 0
+    Batch_Size: 16
+    Segment_Size: 32
+    Learning_Rate:
+        Initial: 2.0e-4
+        Decay: 0.999875
+        Lambda:
+            GAN_Forward: 0.1
+            STFT: 45.0
+            F0: 45.0
+            KLD_Forward: 0.001
+            Token_CTC: 45.0
+            Feature_Map: 2.0
+    ADAM:
+        Beta1: 0.8
+        Beta2: 0.99
+        Epsilon: 1.0e-9
+    Gradient_Norm: 0.0
+    Max_Step: 1000000
+    Checkpoint_Save_Interval: 5000
+    Logging_Interval: 1
+    Evaluation_Interval: 1000
+    Inference_Interval: 5000
+    Initial_Inference: true
+    Inference_in_Train:
+        Text: [
+            'Do not kill the goose that lays the golden eggs.',
+            'A good medicine tastes bitter.',
+            'Do not count your chickens before they hatch.',
+            'If you laugh, blessings will come your way.'
+            ]
+        Speaker: [
+            'VCTK.P245',
+            'VCTK.P294',
+            'VCTK.P339',
+            'VCTK.S5',
+            ]
+
+Inference_Batch_Size: 16
+
+Inference_Path: './results/Inference'
+Checkpoint_Path: './results/Checkpoint'
+Log_Path: './results/Log'
+
+Weights_and_Biases:
+    # Use: true
+    Use: false
+    Project: 'HierSpeech'
+    Entity: 'codejin'
+    Name: 'VCTK'
+    Save_Checkpoint:
+        Use: false
+        Interval: 50000 # Unlike local, The capacity of WandB is small.
+
+Use_Mixed_Precision: true   # Don't use mixed precision in this model.
+Use_Multi_GPU: false
+Device: '0'
+# Use_Multi_GPU: true
+# Device: '0,1,2,3,4,5,6,7'
