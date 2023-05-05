@@ -2,12 +2,13 @@ from argparse import Namespace
 import torch
 import math
 from typing import Optional, Union
+from encodec import EncodecModel
 
 from .Nvidia_Alignment_Learning_Framework import Alignment_Learning_Framework
 from .Diffusion import Diffusion
-
+from .LinearAttention import LinearAttention
 from .Layer import Conv1d, LayerNorm
-from encodec import EncodecModel
+
 
 class NaturalSpeech2(torch.nn.Module):
     def __init__(self, hyper_parameters: Namespace):
@@ -85,9 +86,7 @@ class NaturalSpeech2(torch.nn.Module):
             feature_lengths= latent_lengths,
             attention_priors= attention_priors
             )
-        print(durations[0])
-        assert False
-
+        
         encodings_expand, duration_predictions, f0_predictions, _, _, _ = self.variance_block(
             encodings= encodings,
             encoding_lengths= token_lengths,
@@ -174,8 +173,6 @@ class Phoneme_Encoder(torch.nn.Module):
         embedding_variance = math.sqrt(3.0) * math.sqrt(2.0 / (self.hp.Tokens + self.hp.Encoder.Size))
         self.token_embedding.weight.data.uniform_(-embedding_variance, embedding_variance)
 
-        self.positional_encoding = Positional_Encoding(self.hp.Encoder.Size)
-
         self.blocks = torch.nn.ModuleList([
             FFT_Block(
                 channels= self.hp.Encoder.Size,
@@ -196,7 +193,6 @@ class Phoneme_Encoder(torch.nn.Module):
         tokens: [Batch, Time]
         '''
         encodings = self.token_embedding(tokens).permute(0, 2, 1)
-        encodings = self.positional_encoding(encodings)
         
         for block in self.blocks:
             encodings = block(encodings, lengths)
@@ -214,10 +210,13 @@ class FFT_Block(torch.nn.Module):
         ) -> None:
         super().__init__()
 
-        self.attention = torch.nn.MultiheadAttention(
-            embed_dim= channels,
+        self.attention = LinearAttention(
+            query_channels= channels,
+            key_channels= channels, 
+            value_channels= channels,
+            calc_channels= channels,
             num_heads= num_head,
-            dropout= dropout_rate
+            dropout_rate= dropout_rate
             )
         
         self.ffn = FFN(
@@ -236,19 +235,20 @@ class FFT_Block(torch.nn.Module):
         '''
         masks = Mask_Generate(lengths= lengths, max_length= torch.ones_like(x[0, 0]).sum())   # [Batch, Time]
 
-        x = x.permute(2, 0, 1)    # [Time, Batch, Dim]
+        # Attention + Dropout + Residual + LayerNorm
         x = self.attention(
-            query= x,
-            key= x,
-            value= x,
+            queries= x,
+            keys= x,
+            values= x,
             key_padding_mask= masks
-            )[0].permute(1, 2, 0)
+            )
         
         # FFN + Dropout + LayerNorm
         float_masks = (~masks).unsqueeze(1).float()   # float mask
         x = self.ffn(x, float_masks)
 
         return x * float_masks
+
 
 class FFN(torch.nn.Module):
     def __init__(
@@ -313,8 +313,6 @@ class Speech_Prompter(torch.nn.Module):
             w_init_gain= 'linear'
             )
 
-        self.positional_encoding = Positional_Encoding(self.hp.Speech_Prompter.Size)
-
         self.blocks = torch.nn.ModuleList([
             FFT_Block(
                 channels= self.hp.Speech_Prompter.Size,
@@ -341,7 +339,6 @@ class Speech_Prompter(torch.nn.Module):
             )
 
         speech_prompts = self.prenet(speech_prompts)
-        speech_prompts = self.positional_encoding(speech_prompts)
 
         for block in self.blocks:
             speech_prompts = block(
@@ -454,10 +451,13 @@ class Variance_Predictor(torch.nn.Module):
                 self.conv_blocks.append(conv_block)
 
         self.attentions = torch.nn.ModuleList([
-            torch.nn.MultiheadAttention(
-                embed_dim= channels,
+            LinearAttention(
+                query_channels= channels,
+                key_channels= channels, 
+                value_channels= channels,
+                calc_channels= channels,
                 num_heads= attention_num_head,
-                dropout= attention_dropout_rate
+                dropout_rate= attention_dropout_rate
                 )
             for index in range(stack)
             ])
@@ -483,20 +483,17 @@ class Variance_Predictor(torch.nn.Module):
         masks = Mask_Generate(lengths= lengths, max_length= torch.ones_like(encodings[0, 0]).sum()) # [Batch, Enc_t]
         float_masks = (~masks).unsqueeze(1).float()   # float mask, [Batch, 1, Enc_t]
         x = encodings
-        speech_prompts = speech_prompts.permute(2, 0, 1)    # [Prompt_t, Batch, Prompt_d]
 
         for conv_blocks, attention in zip(self.conv_blocks, self.attentions):
             for block in conv_blocks:
                 x = block(x * float_masks) * float_masks
 
-            residuals = x
+            # Attention + Dropout + Residual + LayerNorm
             x = attention(
-                query= x.permute(2, 0, 1),
-                key= speech_prompts,
-                value= speech_prompts
-                )[0].permute(1, 2, 0)
-            
-            x = x + residuals
+                queries= x,
+                keys= speech_prompts,
+                values= speech_prompts
+                )
 
         x = self.projection(x * float_masks) * float_masks
 
@@ -582,19 +579,3 @@ def Mask_Generate(lengths: torch.Tensor, max_length: Optional[Union[int, torch.T
     max_length = max_length or torch.max(lengths)
     sequence = torch.arange(max_length)[None, :].to(lengths.device)
     return sequence >= lengths[:, None]    # [Batch, Time]
-
-
-# https://github.com/NVIDIA/DeepLearningExamples/blob/master/PyTorch/SpeechSynthesis/FastPitch/fastpitch/transformer.py
-class Positional_Encoding(torch.nn.Module):
-    def __init__(self, channels: int):
-        super().__init__()
-        self.demb = channels
-        inv_freq = 1 / (10000 ** (torch.arange(0.0, channels, 2.0) / channels))
-        self.register_buffer('inv_freq', inv_freq)
-
-    def forward(self, x):
-        positional_sequence = torch.arange(x.size(2), device= x.device).to(x.dtype)
-        sinusoid_inp = self.inv_freq.unsqueeze(1) @ positional_sequence.unsqueeze(0)
-        positional_encodings = torch.cat([sinusoid_inp.sin(), sinusoid_inp.cos()], dim= 0)
-
-        return x + positional_encodings.unsqueeze(0)

@@ -4,6 +4,7 @@ from argparse import Namespace
 from typing import Optional, List, Dict, Union
 from tqdm import tqdm
 
+from .LinearAttention import LinearAttention
 from .Layer import Conv1d, Lambda
 
 class Diffusion(torch.nn.Module):
@@ -266,8 +267,7 @@ class Denoiser(torch.nn.Module):
             Conv1d(
                 in_channels= self.hp.Audio_Codec.Size,
                 out_channels= self.hp.Diffusion.Size,
-                kernel_size= 1,
-                w_init_gain= 'relu'
+                kernel_size= 1
                 ),
             torch.nn.ReLU()
             )
@@ -319,24 +319,27 @@ class Denoiser(torch.nn.Module):
             for _ in range(self.hp.Diffusion.Stack)
             ])
         
-        self.pre_attention = torch.nn.MultiheadAttention(
-            embed_dim= self.hp.Diffusion.Attention.Query_Size,
+        self.pre_attention = LinearAttention(
+            query_channels= self.hp.Diffusion.Attention.Query_Size,
+            key_channels= self.hp.Speech_Prompter.Size, 
+            value_channels= self.hp.Speech_Prompter.Size,
+            calc_channels= self.hp.Diffusion.Attention.Query_Size,
             num_heads= self.hp.Diffusion.Attention.Head,
-            dropout= self.hp.Diffusion.Attention.Dropout_Rate,
-            kdim= self.hp.Speech_Prompter.Size,
-            vdim= self.hp.Speech_Prompter.Size
+            dropout_rate= self.hp.Diffusion.Attention.Dropout_Rate
             )
+
         self.pre_attention_query = torch.nn.Parameter(
-            torch.randn(self.hp.Diffusion.Attention.Query_Token, 1, self.hp.Diffusion.Attention.Query_Size)
+            torch.randn(1, self.hp.Diffusion.Attention.Query_Size, self.hp.Diffusion.Attention.Query_Token)
             )
         
         self.attentions = torch.nn.ModuleList([
-            torch.nn.MultiheadAttention(
-                embed_dim= self.hp.Diffusion.Size,
+            LinearAttention(
+                query_channels= self.hp.Diffusion.Size,
+                key_channels= self.hp.Speech_Prompter.Size, 
+                value_channels= self.hp.Speech_Prompter.Size,
+                calc_channels= self.hp.Diffusion.Size,
                 num_heads= self.hp.Diffusion.Attention.Head,
-                dropout= self.hp.Diffusion.Attention.Dropout_Rate,
-                kdim= self.hp.Speech_Prompter.Size,
-                vdim= self.hp.Speech_Prompter.Size
+                dropout_rate= self.hp.Diffusion.Attention.Dropout_Rate
                 )
             for _ in range(self.hp.Diffusion.Stack)
             ])
@@ -353,6 +356,7 @@ class Denoiser(torch.nn.Module):
             in_channels= self.hp.Diffusion.Size,
             out_channels= self.hp.Audio_Codec.Size,
             kernel_size= 1,
+            w_init_gain= 'zero'
             )
 
 
@@ -379,10 +383,10 @@ class Denoiser(torch.nn.Module):
         conditions = encodings + diffusion_steps    # [Batch, Diffusion_d, Audio_ct]
 
         speech_prompts = self.pre_attention(
-            query= self.pre_attention_query.expand(-1, speech_prompts.size(0), -1),
-            key= speech_prompts.permute(2, 0, 1),
-            value= speech_prompts.permute(2, 0, 1),
-            )[0]   # [Token_n, Batch, Diffusion_d]
+            queries= self.pre_attention_query.expand(speech_prompts.size(0), -1, -1),
+            keys= speech_prompts,
+            values= speech_prompts,
+            )   # [Batch, Diffusion_d, Token_n]
 
         for wavenet, attention, film in zip(self.wavenets, self.attentions, self.films):
             x = wavenet(
@@ -391,10 +395,10 @@ class Denoiser(torch.nn.Module):
                 conditions= conditions
                 )   # [Batch, Diffusion_d, Audio_ct]            
             prompt_conditions = attention(
-                query= x.permute(2, 0, 1),
-                key= speech_prompts,
-                value= speech_prompts,
-                )[0].permute(1, 2, 0)   # [Batch, Diffusion_d, Audio_ct]            
+                queries= x,
+                keys= speech_prompts,
+                values= speech_prompts,
+                )   # [Batch, Diffusion_d, Audio_ct]            
             x = film(x, prompt_conditions, masks)   # [Batch, Diffusion_d, Audio_ct]
 
         x = self.postnet(x) * masks
@@ -512,7 +516,8 @@ class FilM(Conv1d):
         super().__init__(
             in_channels= condition_channels,
             out_channels= channels * 2,
-            kernel_size= 1
+            kernel_size= 1,
+            w_init_gain= 'linear'
             )
 
     def forward(

@@ -120,7 +120,7 @@ Train:
             Max: 200
     Num_Workers: 0
     Batch_Size: 8
-    Segment_Size: 48
+    Segment_Size: 64
     Learning_Rate:
         Initial: 5.0e-4
         Decay: 0.999875
@@ -173,7 +173,7 @@ Weights_and_Biases:
         Use: false
         Interval: 50000 # Unlike local, The capacity of WandB is small.
 
-Use_Mixed_Precision: false  # Don't use mixed precision in this model.
+Use_Mixed_Precision: true  # Don't use mixed precision in this model.
 Use_Multi_GPU: false
 Device: '0'
 # Use_Multi_GPU: true
