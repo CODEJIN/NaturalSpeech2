@@ -1,22 +1,28 @@
-# HierSpeech
+# NaturalSpeech 2
 
-* This code is a unofficial implementation of HierSpeech.
-* The algorithm is based on the following papers:
+* This code is a unofficial implementation of NaturalSpeech 2.
+* The algorithm is based on the following paper:
 
 ```
-Lee, S. H., Kim, S. B., Lee, J. H., Song, E., Hwang, M. J., & Lee, S. W. HierSpeech: Bridging the Gap between Text and Speech by Hierarchical Variational Inference using Self-supervised Representations for Speech Synthesis. In Advances in Neural Information Processing Systems.
+Shen, K., Ju, Z., Tan, X., Liu, Y., Leng, Y., He, L., ... & Bian, J. (2023). NaturalSpeech 2: Latent Diffusion Models are Natural and Zero-Shot Speech and Singing Synthesizers. arXiv preprint arXiv:2304.09116.
 ```
 
-# Structure
-* The structure is derived from HierSpeech, but I made several modifications.
-* The multi-head attention in the FFT Block has been replaced with linearized attention.
-* Discriminator
-    * Following the advice of the [author](https://github.com/sh-lee-prml) of the paper, **multi stft discriminator** have been applied.
-    * To prevent the discriminator from winning, the gradient penalty is applied through R1 regularization.
-* Speaker embeddings are generated using d-vectors from the GE2E algorithm.
-* F0 values are additionally used.
-    * I am not sure if this improves the quality.
-    * This is done to control the pitch.
+# Modifications from Paper
+* The structure is derived from NaturalSpeech 2, but I made several modifications.
+* The audio codec has been changed to Meta's `Encodec 24Khz`.
+    * This is done to reduce the time spent training a separate audio codec.
+    * The model uses 16Khz audio, but no audio resampling is applied.
+    * The dimension of Encodec is 128, which is smaller than the hyperparameter provided in the paper, which is 256. This may affect the performance degradation.
+    * According to the paper, it would be better to use Google's pretrained `SoundStream`, but I couldn't apply `Lyra`, which includes SoundStream, to this repository because PyTorch source code was not provided.
+        * There is an unverified implementation of SoundStream in [Codec.py](./Modules/Codec_Backup/Codec.py), so please refer to it.
+        * There is also a tflite version of Lyra, which may allow the application of SoundStream using it.
+* Information on the segment length σ of the speech prompt during training was not found in the paper and was arbitrarily set.
+    * The `σ` = 3, 5, and 10 seconds used in the evaluation of paper are too long to apply to both the variance predictor and diffusion during training.
+    * To ensure stability in pattern usage, half the length of the shortest pattern used in each training is set as `σ` for each training.
+* The target duration is obtained through Nvidia's `Alignment Learning Framework (ALF)`, rather than being brought in externally.
+    * Although there may be some benefits to using external modules such as `Montreal Force Alignment (MFA)` in terms of training speed, we prioritized * shortening the training process.
+* Padding is applied between tokens like 'A <P> B <P> C ....'
+    * We could not verify whether there was a difference in performance depending on its usage.
 
 # Supported dataset
 * [LJ Dataset](https://keithito.com/LJ-Speech-Dataset/)
@@ -32,9 +38,6 @@ Before proceeding, please set the pattern, inference, and checkpoint paths in [H
 * Tokens
     * The number of token.
 
-* Discriminator
-    * If `Use_STFT` is `true`, model use period and stft discriminator, except scale.
-    * If `Use_STFT` is `false`, model use period and scale discriminator, except stft.
 
 * Train
     * Setting the parameters of training.

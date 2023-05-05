@@ -1,301 +1,163 @@
 from argparse import Namespace
-import torch, torchaudio, torchvision
+import torch
 import math
-from typing import Optional, List, Dict, Tuple, Union
+from typing import Optional, Union
 
+from .Nvidia_Alignment_Learning_Framework import Alignment_Learning_Framework
 from .Diffusion import Diffusion
-from .Codec import Encoder as Audio_Codec_Encoder, Decoder as Audio_Codec_Decoder
-from .Meta_RVQ import ResidualVectorQuantization
-from .Layer import Conv1d, ConvTranspose1d, Lambda, LayerNorm
-from meldataset import spectrogram_to_mel, mel_spectrogram
+
+from .Layer import Conv1d, LayerNorm
+from encodec import EncodecModel
 
 class NaturalSpeech2(torch.nn.Module):
     def __init__(self, hyper_parameters: Namespace):
         super().__init__()
         self.hp = hyper_parameters
 
-        self.text_encoder = Phoneme_Encoder(self.hp)
-
+        self.encoder = Phoneme_Encoder(self.hp)
         self.speech_prompter = Speech_Prompter(self.hp)
 
-        self.duration_predictor = Duration_Predictor(self.hp)
-        self.f0_predictor = F0_Predictor(self.hp)
+        self.alignment_learning_framework = Alignment_Learning_Framework(
+            feature_size= self.hp.Audio_Codec.Size,
+            encoding_size= self.hp.Encoder.Size
+            )
+
+        self.variance_block = Variacne_Block(self.hp)
 
         self.diffusion = Diffusion(self.hp)
 
-        self.audio_codec_encoder = Audio_Codec_Encoder(self.hp)
-        self.residual_vq = ResidualVectorQuantization(
-            num_quantizers= self.hp.Audio_Codec.Residual_VQ.Stack,
-            dim= self.hp.Audio_Codec.Size,
-            codebook_size= self.hp.Audio_Codec.Residual_VQ.Num_Codebook,
-            codebook_dim= self.hp.Audio_Codec.Size,
-            )
-        self.audio_codec_decoder = Audio_Codec_Decoder(self.hp)
+        self.encodec = EncodecModel.encodec_model_24khz()
         
         self.segment = Segment()
 
     def forward(
         self,
-        tokens: torch.Tensor,
-        token_lengths: torch.Tensor,
-        ge2es: torch.FloatTensor,
-        features: Optional[torch.FloatTensor]= None,
-        feature_lengths: Optional[torch.Tensor]= None,
-        f0s: Optional[torch.Tensor]= None,
-        audios: Optional[torch.Tensor]= None,
-        length_scales: Union[float, List[float], torch.Tensor]= 1.0,
+        tokens: torch.LongTensor,
+        token_lengths: torch.LongTensor,
+        speech_prompts: torch.FloatTensor,
+        speech_prompts_for_diffusion: Optional[torch.FloatTensor]= None,
+        latents: Optional[torch.FloatTensor]= None,
+        latent_lengths: Optional[torch.LongTensor]= None,
+        f0s: Optional[torch.FloatTensor]= None, 
+        attention_priors: Optional[torch.FloatTensor]= None,
         ):
-        if not features is None and not feature_lengths is None:    # train
+        if not latents is None and not latent_lengths is None:    # train
             return self.Train(
                 tokens= tokens,
                 token_lengths= token_lengths,
-                ge2es= ge2es,
-                features= features,
-                feature_lengths= feature_lengths,
+                speech_prompts= speech_prompts,
+                speech_prompts_for_diffusion= speech_prompts_for_diffusion,
+                latents= latents,
+                latent_lengths= latent_lengths,
                 f0s= f0s,
-                audios= audios
+                attention_priors= attention_priors
                 )
         else:   #  inference
             return self.Inference(
                 tokens= tokens,
                 token_lengths= token_lengths,
-                ge2es= ge2es,
-                length_scales= length_scales
+                speech_prompts= speech_prompts
                 )
 
     def Train(
         self,
-        tokens: torch.Tensor,
-        token_lengths: torch.Tensor,
-        ge2es: torch.FloatTensor,
-        features: torch.FloatTensor,
-        feature_lengths: torch.Tensor,
-        f0s: torch.Tensor,
-        audios: torch.Tensor
+        tokens: torch.LongTensor,
+        token_lengths: torch.LongTensor,
+        speech_prompts: torch.FloatTensor,
+        speech_prompts_for_diffusion: torch.FloatTensor,
+        latents: torch.FloatTensor,
+        latent_lengths: torch.LongTensor,
+        f0s: torch.FloatTensor,
+        attention_priors: torch.Tensor,
         ):
-        encoding_means, encoding_log_stds, encodings = self.text_encoder(
+        encodings = self.encoder(
             tokens= tokens,
             lengths= token_lengths
             )
-        conditions = self.condition(ge2es)
-        
-        linguistic_means, linguistic_log_stds = self.linguistic_encoder(audios, feature_lengths)
-        linguistic_samples = linguistic_means + linguistic_log_stds.exp() * torch.randn_like(linguistic_log_stds)
-        linguistic_flows = self.linguistic_flow(
-            x= linguistic_samples,
-            lengths= feature_lengths,
-            conditions= conditions,
-            reverse= False
-            )   # [Batch, Enc_d, Feature_t]
+        speech_prompts = self.speech_prompter(speech_prompts)
+        speech_prompts_for_diffusion = self.speech_prompter(speech_prompts_for_diffusion)
 
-        acoustic_means, acoustic_log_stds = self.acoustic_encoder(features, feature_lengths)
-        acoustic_samples = acoustic_means + acoustic_log_stds.exp() * torch.randn_like(acoustic_log_stds)
-        acoustic_flows = self.acoustic_flow(
-            x= acoustic_samples,
-            lengths= feature_lengths,
-            conditions= conditions,
-            reverse= False
-            )   # [Batch, Enc_d, Feature_t]
-
-        durations, alignments = Calc_Duration(
-            encoding_means= encoding_means,
-            encoding_log_stds= encoding_log_stds,
-            encoding_lengths= token_lengths,
-            decodings= linguistic_flows,
-            decoding_lengths= feature_lengths,
-            )
-        _, duration_losses = self.variance_block(
+        durations, attention_softs, attention_hards, attention_logprobs = self.alignment_learning_framework(
+            token_embeddings= self.encoder.token_embedding(tokens).permute(0, 2, 1),
             encodings= encodings,
             encoding_lengths= token_lengths,
-            durations= durations
+            features= latents,
+            feature_lengths= latent_lengths,
+            attention_priors= attention_priors
             )
+        print(durations[0])
+        assert False
 
-        encoding_means = encoding_means @ alignments.permute(0, 2, 1)
-        encoding_log_stds = encoding_log_stds @ alignments.permute(0, 2, 1)
-        encoding_samples = encoding_means + encoding_log_stds.exp() * torch.randn_like(encoding_log_stds)
-        f0_predictions, f0_embeddings = self.f0_predictor(
-            encodings= encoding_samples,
-            lengths= feature_lengths,
-            f0s= f0s
+        encodings_expand, duration_predictions, f0_predictions, _, _, _ = self.variance_block(
+            encodings= encodings,
+            encoding_lengths= token_lengths,
+            speech_prompts= speech_prompts,
+            durations= durations,
+            f0s= f0s,
+            latent_lengths= latent_lengths
             )
-
-        acoustic_samples_slice, offsets = self.segment(
-            patterns= (acoustic_samples + f0_embeddings).permute(0, 2, 1),
+        
+        encodings_expand_slice, offsets = self.segment(
+            patterns= encodings_expand.permute(0, 2, 1),
             segment_size= self.hp.Train.Segment_Size,
-            lengths= feature_lengths
-            )
-        acoustic_samples_slice = acoustic_samples_slice.permute(0, 2, 1)    # [Batch, Enc_d, Feature_st]
-
-        mels = spectrogram_to_mel(
-            features,
-            n_fft= self.hp.Sound.N_FFT,
-            num_mels= self.hp.Sound.Mel_Dim,
-            sampling_rate= self.hp.Sound.Sample_Rate,
-            win_size= self.hp.Sound.Frame_Length,
-            fmin= 0,
-            fmax= None,
-            use_denorm= False
-            )
-        mels_slice, _ = self.segment(
-            patterns= mels.permute(0, 2, 1),
+            lengths= latent_lengths
+            )        
+        encodings_expand_slice = encodings_expand_slice.permute(0, 2, 1)
+           
+        latents_slice, _ = self.segment(
+            patterns= latents.permute(0, 2, 1),
             segment_size= self.hp.Train.Segment_Size,
             offsets= offsets
             )
-        mels_slice = mels_slice.permute(0, 2, 1)    # [Batch, Mel_d, Feature_st]
-        
-        audios_slice, _ = self.segment(
-            patterns= audios,
-            segment_size= self.hp.Train.Segment_Size * self.hp.Sound.Frame_Shift,
-            offsets= offsets * self.hp.Sound.Frame_Shift
-            )   # [Batch, Audio_st(Feature_st * Hop_Size)]
+        latents_slice = latents_slice.permute(0, 2, 1)
 
-        audio_predictions_slice = self.decoder(
-            encodings= acoustic_samples_slice,
-            lengths= torch.full_like(feature_lengths, self.hp.Train.Segment_Size),
-            conditions= conditions,
-            )
-
-        mel_predictions_slice = mel_spectrogram(
-            audio_predictions_slice,
-            n_fft= self.hp.Sound.N_FFT,
-            num_mels= self.hp.Sound.Mel_Dim,
-            sampling_rate= self.hp.Sound.Sample_Rate,
-            hop_size= self.hp.Sound.Frame_Shift,
-            win_size= self.hp.Sound.Frame_Length,
-            fmin= 0,
-            fmax= None
-            )
-
-        token_predictions = self.token_predictor(
-            encodings= linguistic_samples
-            )
-
-
-        
-        
-        # forwad flow from natural speech
-        linguistic_samples_forward = self.linguistic_flow(
-            x= encoding_samples,
-            lengths= feature_lengths,
-            conditions= conditions,
-            reverse= True
-            )   # [Batch, Enc_d, Feature_t]        
-        acoustic_samples_forward = self.acoustic_flow(
-            x= linguistic_samples,
-            lengths= feature_lengths,
-            conditions= conditions,
-            reverse= True
-            )   # [Batch, Enc_d, Feature_t]
-        
-        acoustic_samples_forward_slice, offsets = self.segment(
-            patterns= (acoustic_samples_forward + f0_embeddings).permute(0, 2, 1),
-            segment_size= self.hp.Train.Segment_Size,
-            lengths= feature_lengths
-            )
-        acoustic_samples_forward_slice = acoustic_samples_forward_slice.permute(0, 2, 1)    # [Batch, Enc_d, Feature_st]
-
-        audios_forward_slice, _ = self.segment(
-            patterns= audios,
-            segment_size= self.hp.Train.Segment_Size * self.hp.Sound.Frame_Shift,
-            offsets= offsets * self.hp.Sound.Frame_Shift
-            )   # [Batch, Audio_st(Feature_st * Hop_Size)]
-
-        audio_predictions_forward_slice = self.decoder(
-            encodings= acoustic_samples_forward_slice,
-            lengths= torch.full_like(feature_lengths, self.hp.Train.Segment_Size),
-            conditions= conditions,
+        _, noises, epsilons = self.diffusion(
+            encodings= encodings_expand_slice,
+            lengths= torch.full_like(latent_lengths, fill_value= self.hp.Train.Segment_Size),
+            speech_prompts= speech_prompts_for_diffusion,
+            latents= latents_slice
             )
 
         return \
-            audio_predictions_slice, audios_slice, mel_predictions_slice, mels_slice, \
-            audio_predictions_forward_slice, audios_forward_slice, \
-            encoding_means, encoding_log_stds, linguistic_flows, linguistic_log_stds, \
-            linguistic_means, linguistic_log_stds, linguistic_samples_forward, encoding_log_stds, \
-            linguistic_means, linguistic_log_stds, acoustic_flows, acoustic_log_stds, \
-            acoustic_means, acoustic_log_stds, acoustic_samples_forward, linguistic_log_stds, \
-            duration_losses, token_predictions, f0_predictions, alignments
+            None, noises, epsilons, duration_predictions, f0_predictions, \
+            attention_softs, attention_hards, attention_logprobs, durations, None, None
 
     def Inference(
         self,
-        tokens: torch.Tensor,
-        token_lengths: torch.Tensor,
-        ge2es: torch.FloatTensor,
-        length_scales: Union[float, List[float], torch.Tensor]= 1.0
+        tokens: torch.LongTensor,
+        token_lengths: torch.LongTensor,
+        speech_prompts: torch.FloatTensor,
         ):
-        length_scales = self.Scale_to_Tensor(tokens= tokens, scale= length_scales)
-
-        encoding_means, encoding_log_stds, encodings = self.text_encoder(
+        encodings = self.encoder(
             tokens= tokens,
             lengths= token_lengths
             )
-        conditions = self.condition(ge2es)
-        
-        alignments, _ = self.variance_block(
+        speech_prompts = self.speech_prompter(speech_prompts)
+
+        encodings_expand, _, _, durations, f0s, latent_lengths = self.variance_block(
             encodings= encodings,
             encoding_lengths= token_lengths,
-            length_scales= length_scales
+            speech_prompts= speech_prompts,
             )
-        feature_lengths = alignments.sum(dim= [1, 2])
         
-        encoding_means = encoding_means @ alignments.permute(0, 2, 1)
-        encoding_log_stds = encoding_log_stds @ alignments.permute(0, 2, 1)
-        encoding_samples = encoding_means + encoding_log_stds.exp() * torch.randn_like(encoding_log_stds)
-        f0_predictions, f0_embeddings = self.f0_predictor(
-            encodings= encoding_samples,
-            lengths= feature_lengths
+        latents, _, _ = self.diffusion(
+            encodings= encodings_expand,
+            lengths= latent_lengths,
+            speech_prompts= speech_prompts,
             )
-
-        linguistic_samples = self.linguistic_flow(
-            x= encoding_samples,
-            lengths= feature_lengths,
-            conditions= conditions,
-            reverse= True
-            )   # [Batch, Enc_d, Feature_t]
-
-        acoustic_samples = self.acoustic_flow(
-            x= linguistic_samples,
-            lengths= feature_lengths,
-            conditions= conditions,
-            reverse= True
-            )   # [Batch, Enc_d, Feature_t]
-
-        audio_predictions = self.decoder(
-            encodings= acoustic_samples + f0_embeddings,
-            lengths= feature_lengths,
-            conditions= conditions,
+        
+        # Performing VQ to correct the predictions of incomplete diffusion.
+        latents = self.encodec.quantizer.encode(
+            x= latents,
+            sample_rate= self.encodec.frame_rate,
+            bandwidth= self.encodec.bandwidth
             )
+        latents = self.encodec.quantizer.decode(latents)
+        predictions = self.encodec.decoder(latents).squeeze(1)  # [Batch, Audio_t]
 
         return \
-            audio_predictions, None, None, None, \
-            None, None, \
-            None, None, None, None, \
-            None, None, None, None, \
-            None, None, None, None, \
-            None, None, None, None, \
-            None, None, f0_predictions, alignments
-
-    def Scale_to_Tensor(
-        self,
-        tokens: torch.Tensor,
-        scale: Union[float, List[float], torch.Tensor]
-        ):
-        if isinstance(scale, float):
-            scale = torch.FloatTensor([scale,]).unsqueeze(0).expand(tokens.size(0), tokens.size(1))
-        elif isinstance(scale, list):
-            if len(scale) != tokens.size(0):
-                raise ValueError(f'When scale is a list, the length must be same to the batch size: {len(scale)} != {tokens.size(0)}')
-            scale = torch.FloatTensor(scale).unsqueeze(1).expand(tokens.size(0), tokens.size(1))
-        elif isinstance(scale, torch.Tensor):
-            if scale.ndim != 2:
-                raise ValueError('When scale is a tensor, ndim must be 2.')
-            elif scale.size(0) != tokens.size(0):
-                raise ValueError(f'When scale is a tensor, the dimension 0 of tensor must be same to the batch size: {scale.size(0)} != {tokens.size(0)}')
-            elif scale.size(1) != tokens.size(1):
-                raise ValueError(f'When scale is a tensor, the dimension 1 of tensor must be same to the token length: {scale.size(1)} != {tokens.size(1)}')
-
-        return scale.to(tokens.device)
-
-
+            predictions, None, None, None, None, \
+            None, None, None, durations, f0s, latent_lengths
 
 class Phoneme_Encoder(torch.nn.Module): 
     def __init__(
@@ -311,6 +173,8 @@ class Phoneme_Encoder(torch.nn.Module):
             )
         embedding_variance = math.sqrt(3.0) * math.sqrt(2.0 / (self.hp.Tokens + self.hp.Encoder.Size))
         self.token_embedding.weight.data.uniform_(-embedding_variance, embedding_variance)
+
+        self.positional_encoding = Positional_Encoding(self.hp.Encoder.Size)
 
         self.blocks = torch.nn.ModuleList([
             FFT_Block(
@@ -332,6 +196,7 @@ class Phoneme_Encoder(torch.nn.Module):
         tokens: [Batch, Time]
         '''
         encodings = self.token_embedding(tokens).permute(0, 2, 1)
+        encodings = self.positional_encoding(encodings)
         
         for block in self.blocks:
             encodings = block(encodings, lengths)
@@ -348,8 +213,6 @@ class FFT_Block(torch.nn.Module):
         feedforward_dropout_rate: float= 0.2
         ) -> None:
         super().__init__()
-
-        self.positional_encoding = Positional_Encoding(channels)
 
         self.attention = torch.nn.MultiheadAttention(
             embed_dim= channels,
@@ -373,20 +236,19 @@ class FFT_Block(torch.nn.Module):
         '''
         masks = Mask_Generate(lengths= lengths, max_length= torch.ones_like(x[0, 0]).sum())   # [Batch, Time]
 
-        x = self.positional_encoding(x).permute(2, 0, 1)    # [Time, Batch, Dim]
-        
+        x = x.permute(2, 0, 1)    # [Time, Batch, Dim]
         x = self.attention(
             query= x,
             key= x,
             value= x,
             key_padding_mask= masks
-            ).permute(1, 2, 0)
+            )[0].permute(1, 2, 0)
         
         # FFN + Dropout + LayerNorm
-        masks = (~masks).unsqueeze(1).float()   # float mask
-        x = self.ffn(x, masks)
+        float_masks = (~masks).unsqueeze(1).float()   # float mask
+        x = self.ffn(x, float_masks)
 
-        return x * masks
+        return x * float_masks
 
 class FFN(torch.nn.Module):
     def __init__(
@@ -444,6 +306,15 @@ class Speech_Prompter(torch.nn.Module):
         super().__init__()
         self.hp = hyper_parameters
 
+        self.prenet = Conv1d(
+            in_channels= self.hp.Audio_Codec.Size,
+            out_channels= self.hp.Speech_Prompter.Size,
+            kernel_size= 1,
+            w_init_gain= 'linear'
+            )
+
+        self.positional_encoding = Positional_Encoding(self.hp.Speech_Prompter.Size)
+
         self.blocks = torch.nn.ModuleList([
             FFT_Block(
                 channels= self.hp.Speech_Prompter.Size,
@@ -457,18 +328,102 @@ class Speech_Prompter(torch.nn.Module):
 
     def forward(
         self,
-        sources: torch.Tensor,
-        lengths: torch.Tensor,
+        speech_prompts: torch.Tensor,
         ) -> torch.Tensor:
         '''
-        tokens: [Batch, Time]
+        speech_prompts: [Batch, Dim, Time]
         '''
-        
-        for block in self.blocks:
-            encodings = block(encodings, lengths)
-        
-        return encodings
+        lengths = torch.full(
+            size= (speech_prompts.size(0),),
+            fill_value= speech_prompts.size(2),
+            dtype= torch.long,
+            device= speech_prompts.device
+            )
 
+        speech_prompts = self.prenet(speech_prompts)
+        speech_prompts = self.positional_encoding(speech_prompts)
+
+        for block in self.blocks:
+            speech_prompts = block(
+                x= speech_prompts,
+                lengths= lengths
+                )
+        
+        return speech_prompts
+
+
+class Variacne_Block(torch.nn.Module):
+    def __init__(
+        self,
+        hyper_parameters: Namespace
+        ):
+        super().__init__()
+        self.hp = hyper_parameters
+
+        self.duration_predictor = Duration_Predictor(self.hp)
+        self.f0_predictor = F0_Predictor(self.hp)
+
+        self.f0_embedding = Conv1d(
+            in_channels= 1,
+            out_channels= self.hp.Encoder.Size,
+            kernel_size= 1,
+            w_init_gain= 'linear'
+            )
+        
+    def forward(
+        self,
+        encodings: torch.FloatTensor,
+        encoding_lengths: torch.LongTensor,
+        speech_prompts: torch.FloatTensor,
+        durations: Optional[torch.LongTensor]= None,
+        f0s: Optional[torch.FloatTensor]= None,
+        latent_lengths: Optional[torch.LongTensor]= None,
+        ):
+        duration_predictions = self.duration_predictor(
+            encodings= encodings,
+            lengths= encoding_lengths,
+            speech_prompts= speech_prompts
+            )   # [Batch, Enc_t]
+        
+        if durations is None:
+            durations = duration_predictions.ceil().long() # [Batch, Enc_t]
+            latent_lengths = durations.sum(dim= 1)
+            max_duration_sum = latent_lengths.max()
+
+            for duration, length in zip(durations, encoding_lengths):
+                duration[length - 1:] = 0
+                duration[length - 1] = max_duration_sum - duration.sum()
+
+        alignments = self.Length_Regulate(durations= durations)
+        encodings = encodings @ alignments  # [Batch, Enc_d, Latent_t]
+
+        f0_predictions = self.f0_predictor(
+            encodings= encodings,
+            lengths= latent_lengths,
+            speech_prompts= speech_prompts
+            )   # [Batch, Latent_t]
+
+        if f0s is None:
+            f0s = f0_predictions
+
+        encodings = encodings + self.f0_embedding(f0s.unsqueeze(1))  # [Batch, Enc_d, Latent_t]
+
+        return encodings, duration_predictions, f0_predictions, durations, f0s, latent_lengths
+    
+    def Length_Regulate(
+        self,
+        durations: torch.LongTensor
+        ) -> torch.FloatTensor:
+        repeats = (durations.float() + 0.5).long()
+        decoding_lengths = repeats.sum(dim=1)
+
+        max_decoding_length = decoding_lengths.max()
+        reps_cumsum = torch.cumsum(torch.nn.functional.pad(repeats, (1, 0, 0, 0), value=0.0), dim=1)[:, None, :]
+
+        range_ = torch.arange(max_decoding_length)[None, :, None].to(durations.device)
+        alignments = (reps_cumsum[:, :, :-1] <= range_) & (reps_cumsum[:, :, 1:] > range_)
+        
+        return alignments.permute(0, 2, 1).float()
 
 class Variance_Predictor(torch.nn.Module): 
     def __init__(
@@ -506,6 +461,14 @@ class Variance_Predictor(torch.nn.Module):
                 )
             for index in range(stack)
             ])
+        
+        self.projection = Conv1d(
+            in_channels= channels,
+            out_channels= 1,
+            kernel_size= conv_kernel_size,
+            padding= (conv_kernel_size - 1) // 2,
+            w_init_gain= 'linear'
+            )
 
     def forward(
         self,
@@ -514,30 +477,30 @@ class Variance_Predictor(torch.nn.Module):
         speech_prompts: torch.Tensor
         ) -> torch.Tensor:
         '''
-        encodings: [Batch, Enc_d, Enc_t]
+        encodings: [Batch, Enc_d, Enc_t or Feature_t]
         speech_prompts: [Batch, Enc_d, Prompt_t]
         '''
-        masks = Mask_Generate(lengths= lengths, max_length= torch.ones_like(x[0, 0]).sum()) # [Batch, Enc_t]
+        masks = Mask_Generate(lengths= lengths, max_length= torch.ones_like(encodings[0, 0]).sum()) # [Batch, Enc_t]
         float_masks = (~masks).unsqueeze(1).float()   # float mask, [Batch, 1, Enc_t]
         x = encodings
+        speech_prompts = speech_prompts.permute(2, 0, 1)    # [Prompt_t, Batch, Prompt_d]
 
         for conv_blocks, attention in zip(self.conv_blocks, self.attentions):
             for block in conv_blocks:
                 x = block(x * float_masks) * float_masks
 
-            residuals = x            
-            x = x.permute(2, 0, 1)
-            speech_prompts = speech_prompts.permute(2, 0, 1)
+            residuals = x
             x = attention(
-                query= x,
+                query= x.permute(2, 0, 1),
                 key= speech_prompts,
-                value= speech_prompts,
-                key_padding_mask= masks
-                ).permute(1, 2, 0)
+                value= speech_prompts
+                )[0].permute(1, 2, 0)
             
             x = x + residuals
 
-        return x * masks
+        x = self.projection(x * float_masks) * float_masks
+
+        return x.squeeze(1)
 
 class Duration_Predictor(Variance_Predictor):
     def __init__(
@@ -548,12 +511,29 @@ class Duration_Predictor(Variance_Predictor):
         super().__init__(
             channels= self.hp.Encoder.Size,
             stack= self.hp.Duration_Predictor.Stack,
-            attention_num_head= self.hp.Duration_Predictor.Attention.Num_Head,
+            attention_num_head= self.hp.Duration_Predictor.Attention.Head,
             attention_dropout_rate= self.hp.Duration_Predictor.Attention.Dropout_Rate,
             conv_kernel_size= self.hp.Duration_Predictor.Conv.Kernel_Size,
             conv_stack_in_stack= self.hp.Duration_Predictor.Conv.Stack,
             conv_dropout_rate= self.hp.Duration_Predictor.Conv.Dropout_Rate,
             )
+    
+    def forward(
+        self,
+        encodings: torch.Tensor,
+        lengths: torch.Tensor,
+        speech_prompts: torch.Tensor
+        ) -> torch.Tensor:
+        '''
+        encodings: [Batch, Enc_d, Enc_t or Feature_t]
+        speech_prompts: [Batch, Enc_d, Prompt_t]
+        '''
+        durations = super().forward(
+            encodings= encodings,
+            lengths= lengths,
+            speech_prompts= speech_prompts
+            )
+        return torch.nn.functional.softplus(durations)
         
 class F0_Predictor(Variance_Predictor):
     def __init__(
@@ -564,122 +544,12 @@ class F0_Predictor(Variance_Predictor):
         super().__init__(
             channels= self.hp.Encoder.Size,
             stack= self.hp.Duration_Predictor.Stack,
-            attention_num_head= self.hp.Duration_Predictor.Attention.Num_Head,
+            attention_num_head= self.hp.Duration_Predictor.Attention.Head,
             attention_dropout_rate= self.hp.Duration_Predictor.Attention.Dropout_Rate,
             conv_kernel_size= self.hp.Duration_Predictor.Conv.Kernel_Size,
             conv_stack_in_stack= self.hp.Duration_Predictor.Conv.Stack,
             conv_dropout_rate= self.hp.Duration_Predictor.Conv.Dropout_Rate,
             )
-
-
-class Decoder(torch.nn.Module): 
-    def __init__(
-        self,
-        hyper_parameters: Namespace
-        ):
-        super().__init__()
-        self.hp = hyper_parameters
-
-        self.condition = Conv1d(
-            in_channels= self.hp.Encoder.Size,
-            out_channels= self.hp.Encoder.Size,
-            kernel_size= 1,
-            )
-        self.vae_memory_bank = VAE_Memory_Bank(self.hp)
-
-        self.prenet = Conv1d(
-            in_channels= self.hp.Encoder.Size,
-            out_channels= self.hp.Decoder.Upsample.Base_Size,
-            kernel_size= self.hp.Decoder.Prenet.Kernel_Size,
-            padding= (self.hp.Decoder.Prenet.Kernel_Size - 1) // 2,
-            # w_init_gain= 'leaky_relu'   # Don't use this line.
-            )
-
-        self.upsample_blocks = torch.nn.ModuleList()
-        self.residual_blocks = torch.nn.ModuleList()
-        previous_channels= self.hp.Decoder.Upsample.Base_Size
-        for index, (upsample_rate, kernel_size) in enumerate(zip(
-            self.hp.Decoder.Upsample.Rate,
-            self.hp.Decoder.Upsample.Kernel_Size
-            )):
-            current_channels = self.hp.Decoder.Upsample.Base_Size // (2 ** (index + 1))
-            upsample_block = torch.nn.Sequential(
-                torch.nn.LeakyReLU(
-                    negative_slope= self.hp.Decoder.LeakyRelu_Negative_Slope
-                    ),
-                torch.nn.utils.weight_norm(ConvTranspose1d(
-                    in_channels= previous_channels,
-                    out_channels= current_channels,
-                    kernel_size= kernel_size,
-                    stride= upsample_rate,
-                    padding= (kernel_size - upsample_rate) // 2
-                    ))
-                )
-            self.upsample_blocks.append(upsample_block)
-            residual_blocks = torch.nn.ModuleList()
-            for residual_kernel_size, residual_dilation_size in zip(
-                self.hp.Decoder.Residual_Block.Kernel_Size,
-                self.hp.Decoder.Residual_Block.Dilation_Size
-                ):
-                residual_blocks.append(Decoder_Residual_Block(
-                    channels= current_channels,
-                    kernel_size= residual_kernel_size,
-                    dilations= residual_dilation_size,
-                    negative_slope= self.hp.Decoder.LeakyRelu_Negative_Slope
-                    ))
-            self.residual_blocks.append(residual_blocks)
-            previous_channels = current_channels
-
-        self.postnet = torch.nn.Sequential(
-            torch.nn.LeakyReLU(),
-            Conv1d(
-                in_channels= previous_channels,
-                out_channels= 1,
-                kernel_size= self.hp.Decoder.Postnet.Kernel_Size,
-                padding= (self.hp.Decoder.Postnet.Kernel_Size - 1) // 2,
-                bias= False,
-                # w_init_gain= 'tanh' # Don't use this line.
-                ),
-            torch.nn.Tanh(),
-            Lambda(lambda x: x.squeeze(1))
-            )
-
-        # This is critical when using weight normalization.
-        def weight_norm_initialize_weight(module):
-            if 'Conv' in module.__class__.__name__:
-                module.weight.data.normal_(0.0, 0.01)
-        self.upsample_blocks.apply(weight_norm_initialize_weight)
-        self.residual_blocks.apply(weight_norm_initialize_weight)
-            
-    def forward(
-        self,
-        encodings: torch.Tensor,
-        lengths: torch.Tensor,
-        conditions: torch.Tensor,
-        ) -> torch.Tensor:
-        masks = (~Mask_Generate(lengths= lengths, max_length= torch.ones_like(encodings[0, 0]).sum())).unsqueeze(1).float()
-        if conditions.ndim == 2:
-            conditions = conditions.unsqueeze(2)
-
-        decodings = self.vae_memory_bank(encodings + self.condition(conditions)) * masks
-        decodings = self.prenet(decodings) * masks
-        for upsample_block, residual_blocks, upsample_rate in zip(
-            self.upsample_blocks,
-            self.residual_blocks,
-            self.hp.Decoder.Upsample.Rate
-            ):
-            decodings = upsample_block(decodings)
-            lengths = lengths * upsample_rate
-            masks = (~Mask_Generate(lengths= lengths, max_length= torch.ones_like(decodings[0, 0]).sum())).unsqueeze(1).float()
-            decodings = torch.stack(
-                [block(decodings, masks) for block in residual_blocks],
-                # [block(decodings) for block in residual_block],
-                dim= 1
-                ).mean(dim= 1)
-            
-        predictions = self.postnet(decodings)
-
-        return predictions
 
 
 class Segment(torch.nn.Module):
