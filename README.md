@@ -9,25 +9,32 @@ Shen, K., Ju, Z., Tan, X., Liu, Y., Leng, Y., He, L., ... & Bian, J. (2023). Nat
 
 # Modifications from Paper
 * The structure is derived from NaturalSpeech 2, but I made several modifications.
+* Linear attention is applied instead of dot product-based multihead attention.
+    * This change was made to reduce memory usage and improve computational speed in insufficient enviornment.
+    * This may be a reason of the performance degradation.
 * The audio codec has been changed to Meta's `Encodec 24Khz`.
     * This is done to reduce the time spent training a separate audio codec.
     * The model uses 16Khz audio, but no audio resampling is applied.
-    * The dimension of Encodec is 128, which is smaller than the hyperparameter provided in the paper, which is 256. This may affect the performance degradation.
-    * According to the paper, it would be better to use Google's pretrained `SoundStream`, but I couldn't apply `Lyra`, which includes SoundStream, to this repository because PyTorch source code was not provided.
+    * The dimension of Encodec is 128, which is smaller than the hyperparameter provided in the paper, which is 256. This may be a reason of the performance degradation.
+    * To maintain similarity with the paper, it may be better to apply Google's `SoundStream` instead of Encodec, but I couldn't apply SoundStream to this repository because official pyTorch source code or pretrained model was not provided.
         * There is an unverified implementation of SoundStream in [Codec.py](./Modules/Codec_Backup/Codec.py), so please refer to it.
-        * There is also a tflite version of Lyra, which may allow the application of SoundStream using it.
+        * Although this repository does not use, there is also a [c++ or tflite version of Lyra](https://github.com/google/lyra), which may allow the application of SoundStream using it.
 * Information on the segment length σ of the speech prompt during training was not found in the paper and was arbitrarily set.
     * The `σ` = 3, 5, and 10 seconds used in the evaluation of paper are too long to apply to both the variance predictor and diffusion during training.
     * To ensure stability in pattern usage, half the length of the shortest pattern used in each training is set as `σ` for each training.
 * The target duration is obtained through Nvidia's `Alignment Learning Framework (ALF)`, rather than being brought in externally.
-    * Although there may be some benefits to using external modules such as `Montreal Force Alignment (MFA)` in terms of training speed, we prioritized * shortening the training process.
-* Padding is applied between tokens like 'A <P> B <P> C ....'
-    * We could not verify whether there was a difference in performance depending on its usage.
+    * Using external modules such as Montreal Force Alignment (MFA) may have benefits in terms of training speed or stability, but I prioritized simplifying the training process.
+* Padding is applied between tokens like `'A <P> B <P> C ....'`
+    * I could not verify whether there was a difference in performance depending on its usage.
 
 # Supported dataset
-* [LJ Dataset](https://keithito.com/LJ-Speech-Dataset/)
-* [VCTK Dataset](https://datashare.ed.ac.uk/handle/10283/2651)
-    * This repository used the VCTK092 from Torchaudio(https://datashare.is.ed.ac.uk/bitstream/handle/10283/3443/VCTK-Corpus-0.92.zip)
+* To apply zero-shot reported in the paper, I believe that it is necessary to have as many speakers as possible in the training data, but I were unable to test [Multilingual LibriSpeech](https://www.openslr.org/94/) due to current environment.
+* Tested
+    * [LJ Dataset](https://keithito.com/LJ-Speech-Dataset/)
+    * [VCTK Dataset](https://datashare.ed.ac.uk/handle/10283/2651)
+        * This repository used the VCTK092 from Torchaudio(https://datashare.is.ed.ac.uk/bitstream/handle/10283/3443/VCTK-Corpus-0.92.zip)
+* Supported but not tested
+    * [Libri Dataset](https://datashare.ed.ac.uk/handle/10283/2651)
 
 # Hyper parameters
 Before proceeding, please set the pattern, inference, and checkpoint paths in [Hyper_Parameters.yaml](Hyper_Parameters.yaml) according to your environment.
@@ -36,8 +43,8 @@ Before proceeding, please set the pattern, inference, and checkpoint paths in [H
     * Setting basic sound parameters.
 
 * Tokens
-    * The number of token.
-
+    * The number of token.    
+    * After pattern generating, you can see which tokens are included in the dataset at `Token_Path`.
 
 * Train
     * Setting the parameters of training.
@@ -60,8 +67,8 @@ Before proceeding, please set the pattern, inference, and checkpoint paths in [H
 * Use_Multi_GPU
     * Setting using multi gpu
     * By the nvcc problem, Only linux supports this option.
-    * If this is `True`, device parameter is also multiple like '0,1,2,3'.
-    * And you have to change the training command also: please check  [multi_gpu.sh](./multi_gpu.sh).
+    * If this is `True`, device parameter is also multiple like `0,1,2,3`.
+    * And you have to change the training command also: please check [multi_gpu.sh](./multi_gpu.sh).
 
 * Device
     * Setting which GPU devices are used in multi-GPU enviornment.
@@ -75,6 +82,10 @@ python Pattern_Generate.py [parameters]
 ## Parameters
 * -lj
     * The path of LJSpeech dataset
+* -vctk
+    * The path of VCTK dataset
+* -libri
+    * The path of LbiriTTS dataset
 * -hp
     * The path of hyperparameter.
 

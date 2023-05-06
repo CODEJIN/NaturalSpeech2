@@ -83,10 +83,15 @@ class Trainer:
 
     def Dataset_Generate(self):
         token_dict = yaml.load(open(self.hp.Token_Path, 'r', encoding= 'utf-8-sig'), Loader=yaml.Loader)
+        latent_range_info_dict = yaml.load(open(self.hp.Latent_Range_Info_Path, 'r'), Loader=yaml.Loader)
+        self.latent_min = min([x['Min'] for x in latent_range_info_dict.values()])
+        self.latent_max = max([x['Max'] for x in latent_range_info_dict.values()])
         f0_info_dict = yaml.load(open(self.hp.F0_Info_Path, 'r'), Loader=yaml.Loader)
 
         train_dataset = Dataset(
             token_dict= token_dict,
+            latent_min= self.latent_min,
+            latent_max= self.latent_max,
             f0_info_dict= f0_info_dict,
             pattern_path= self.hp.Train.Train_Pattern.Path,
             metadata_file= self.hp.Train.Train_Pattern.Metadata_File,
@@ -100,6 +105,8 @@ class Trainer:
             )
         eval_dataset = Dataset(
             token_dict= token_dict,
+            latent_min= self.latent_min,
+            latent_max= self.latent_max,
             f0_info_dict= f0_info_dict,
             pattern_path= self.hp.Train.Eval_Pattern.Path,
             metadata_file= self.hp.Train.Eval_Pattern.Metadata_File,
@@ -160,8 +167,12 @@ class Trainer:
             pin_memory= True
             )
 
-    def Model_Generate(self):        
-        self.model = NaturalSpeech2(self.hp).to(self.device)
+    def Model_Generate(self):
+        self.model = NaturalSpeech2(
+            self.hp,
+            latent_min= self.latent_min,
+            latent_max= self.latent_max
+            ).to(self.device)
         self.criterion_dict = {
             'MSE': torch.nn.MSELoss(reduce= None).to(self.device),
             'MAE': torch.nn.L1Loss(reduce= None).to(self.device),            
@@ -185,7 +196,7 @@ class Trainer:
         # if self.gpu_id == 0:
         #     logging.info(self.model)
 
-    def Train_Step(self, tokens, token_lengths, speech_prompts, speech_prompts_for_diffusion, latents, latent_lengths, f0s, attention_priors):
+    def Train_Step(self, tokens, token_lengths, speech_prompts, speech_prompts_for_diffusion, latents, latent_lengths, f0s, mels, attention_priors):
         loss_dict = {}
         tokens = tokens.to(self.device, non_blocking=True)
         token_lengths = token_lengths.to(self.device, non_blocking=True)
@@ -194,6 +205,7 @@ class Trainer:
         latents = latents.to(self.device, non_blocking=True)
         latent_lengths = latent_lengths.to(self.device, non_blocking=True)
         f0s = f0s.to(self.device, non_blocking=True)
+        mels = mels.to(self.device, non_blocking=True)
         attention_priors = attention_priors.to(self.device, non_blocking=True)
 
         with torch.cuda.amp.autocast(enabled= self.hp.Use_Mixed_Precision):
@@ -206,6 +218,7 @@ class Trainer:
                 latents= latents,
                 latent_lengths= latent_lengths,
                 f0s= f0s,
+                mels= mels,
                 attention_priors= attention_priors
                 )
             
@@ -263,7 +276,7 @@ class Trainer:
             self.scalar_dict['Train']['Loss/{}'.format(tag)] += loss
 
     def Train_Epoch(self):
-        for tokens, token_lengths, speech_prompts, speech_prompts_for_diffusion, latents, latent_lengths, f0s, attention_priors in self.dataloader_dict['Train']:
+        for tokens, token_lengths, speech_prompts, speech_prompts_for_diffusion, latents, latent_lengths, f0s, mels, attention_priors in self.dataloader_dict['Train']:
             self.Train_Step(
                 tokens= tokens,
                 token_lengths= token_lengths,
@@ -272,6 +285,7 @@ class Trainer:
                 latents= latents,
                 latent_lengths= latent_lengths,
                 f0s= f0s,
+                mels= mels,
                 attention_priors= attention_priors,
                 )
 
@@ -307,7 +321,7 @@ class Trainer:
 
         self.scheduler.step()
 
-    def Evaluation_Step(self, tokens, token_lengths, speech_prompts, speech_prompts_for_diffusion, latents, latent_lengths, f0s, attention_priors):
+    def Evaluation_Step(self, tokens, token_lengths, speech_prompts, speech_prompts_for_diffusion, latents, latent_lengths, f0s, mels, attention_priors):
         loss_dict = {}
         tokens = tokens.to(self.device, non_blocking=True)
         token_lengths = token_lengths.to(self.device, non_blocking=True)
@@ -316,6 +330,7 @@ class Trainer:
         latents = latents.to(self.device, non_blocking=True)
         latent_lengths = latent_lengths.to(self.device, non_blocking=True)
         f0s = f0s.to(self.device, non_blocking=True)
+        mels = mels.to(self.device, non_blocking=True)
         attention_priors = attention_priors.to(self.device, non_blocking=True)
 
         with torch.cuda.amp.autocast(enabled= self.hp.Use_Mixed_Precision):
@@ -328,6 +343,7 @@ class Trainer:
                 latents= latents,
                 latent_lengths= latent_lengths,
                 f0s= f0s,
+                mels= mels,
                 attention_priors= attention_priors
                 )
 
@@ -366,7 +382,7 @@ class Trainer:
 
         self.model.eval()
 
-        for step, (tokens, token_lengths, speech_prompts, speech_prompts_for_diffusion, latents, latent_lengths, f0s, attention_priors) in tqdm(
+        for step, (tokens, token_lengths, speech_prompts, speech_prompts_for_diffusion, latents, latent_lengths, f0s, mels, attention_priors) in tqdm(
             enumerate(self.dataloader_dict['Eval'], 1),
             desc='[Evaluation]',
             total= math.ceil(len(self.dataloader_dict['Eval'].dataset) / self.hp.Train.Batch_Size / self.num_gpus)
@@ -379,6 +395,7 @@ class Trainer:
                 latents= latents,
                 latent_lengths= latent_lengths,
                 f0s= f0s,
+                mels= mels,
                 attention_priors= attention_priors,
                 )
 
@@ -397,8 +414,10 @@ class Trainer:
                     tokens= tokens[index].unsqueeze(0).to(self.device),
                     token_lengths= token_lengths[index].unsqueeze(0).to(self.device),
                     speech_prompts= speech_prompts[index].unsqueeze(0).to(self.device),
+                    ddim_steps= max(self.hp.Diffusion.Max_Step // 10, 100)
                     )
-                target_audios = self.model.encodec.decoder(latents[index].unsqueeze(0).to(self.device)).squeeze(1)
+                decompressed_taget_latent = (latents[index] + 1.0) / 2.0 * (self.latent_max - self.latent_min) + self.latent_min
+                target_audios = self.model.encodec.decoder(decompressed_taget_latent.unsqueeze(0).to(self.device)).squeeze(1)
             
             token_length = token_lengths[index].item()
             target_latent_length = latent_lengths[index].item()
@@ -406,8 +425,32 @@ class Trainer:
             target_audio_length = target_latent_length * self.hp.Sound.Frame_Shift
             prediction_audio_length = prediction_latent_length * self.hp.Sound.Frame_Shift
 
-            target_audio = target_audios[0, :target_audio_length].cpu().numpy()
-            prediction_audio = prediction_audios[0, :prediction_audio_length].cpu().numpy()
+            target_audio = target_audios[0, :target_audio_length]
+            prediction_audio = prediction_audios[0, :prediction_audio_length]
+
+            target_feature = mel_spectrogram(
+                target_audio.unsqueeze(0),
+                n_fft= self.hp.Sound.Frame_Shift * 4,
+                num_mels= self.hp.Sound.Mel_Dim,
+                sampling_rate= self.hp.Sound.Sample_Rate,
+                hop_size= self.hp.Sound.Frame_Shift,
+                win_size= self.hp.Sound.Frame_Shift * 4,
+                fmin= 0,
+                fmax= None
+                ).squeeze(0).cpu().numpy()            
+            prediction_feature = mel_spectrogram(
+                prediction_audio.unsqueeze(0),
+                n_fft= self.hp.Sound.Frame_Shift * 4,
+                num_mels= self.hp.Sound.Mel_Dim,
+                sampling_rate= self.hp.Sound.Sample_Rate,
+                hop_size= self.hp.Sound.Frame_Shift,
+                win_size= self.hp.Sound.Frame_Shift * 4,
+                fmin= 0,
+                fmax= None
+                ).squeeze(0).cpu().numpy()
+
+            target_audio = target_audio.cpu().numpy()
+            prediction_audio = prediction_audio.cpu().numpy()
 
             target_f0 = f0s[index, :target_latent_length].cpu().numpy() 
             prediction_f0 = prediction_f0s[0, :prediction_latent_length].cpu().numpy()
@@ -416,6 +459,8 @@ class Trainer:
             prediction_duration = torch.arange(prediction_duration.size(0)).repeat_interleave(prediction_duration.cpu()).cpu().numpy()
 
             image_dict = {
+                'Feature/Target': (target_feature, None, 'auto', None, None, None),
+                'Feature/Prediction': (prediction_feature, None, 'auto', None, None, None),
                 'Duration/Prediction': (prediction_duration, None, 'auto', None, None, None),
                 'F0/Target': (target_f0, None, 'auto', None, None, None),
                 'F0/Prediction': (prediction_f0, None, 'auto', None, None, None),
@@ -439,6 +484,8 @@ class Trainer:
                     )
                 wandb.log(
                     data= {
+                        'Evaluation.Feature.Target': wandb.Image(target_feature),
+                        'Evaluation.Feature.Prediction': wandb.Image(prediction_feature),
                         'Evaluation.F0': wandb.plot.line_series(
                             xs= np.arange(target_f0.shape[0]),
                             ys= [target_f0, prediction_f0],
@@ -481,7 +528,8 @@ class Trainer:
         audio_predictions, *_, durations, f0s, latent_lengths = self.model(
             tokens= tokens,
             token_lengths= token_lengths,
-            speech_prompts= speech_prompts
+            speech_prompts= speech_prompts,
+            ddim_steps= max(self.hp.Diffusion.Max_Step // 10, 100)
             )
 
         audio_lengths = [
@@ -552,7 +600,7 @@ class Trainer:
                 self.hp.Sound.Sample_Rate,
                 audio[:audio_length]
                 )
-            
+
     def Inference_Epoch(self):
         if self.gpu_id != 0:
             return

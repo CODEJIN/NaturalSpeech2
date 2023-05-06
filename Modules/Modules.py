@@ -11,15 +11,22 @@ from .Layer import Conv1d, LayerNorm
 
 
 class NaturalSpeech2(torch.nn.Module):
-    def __init__(self, hyper_parameters: Namespace):
+    def __init__(
+        self,
+        hyper_parameters: Namespace,
+        latent_min: float,
+        latent_max: float,
+        ):
         super().__init__()
         self.hp = hyper_parameters
+        self.latent_min= latent_min
+        self.latent_max= latent_max
 
         self.encoder = Phoneme_Encoder(self.hp)
         self.speech_prompter = Speech_Prompter(self.hp)
 
         self.alignment_learning_framework = Alignment_Learning_Framework(
-            feature_size= self.hp.Audio_Codec.Size,
+            feature_size= self.hp.Sound.Mel_Dim,
             encoding_size= self.hp.Encoder.Size
             )
 
@@ -39,10 +46,19 @@ class NaturalSpeech2(torch.nn.Module):
         speech_prompts_for_diffusion: Optional[torch.FloatTensor]= None,
         latents: Optional[torch.FloatTensor]= None,
         latent_lengths: Optional[torch.LongTensor]= None,
-        f0s: Optional[torch.FloatTensor]= None, 
+        f0s: Optional[torch.FloatTensor]= None,
+        mels: Optional[torch.FloatTensor]= None,
         attention_priors: Optional[torch.FloatTensor]= None,
+        ddim_steps: Optional[int]= None
         ):
-        if not latents is None and not latent_lengths is None:    # train
+        if all([
+            not speech_prompts_for_diffusion is None,
+            not latents is None,
+            not latent_lengths is None,
+            not f0s is None,
+            not mels is None,
+            not attention_priors is None
+            ]):    # train
             return self.Train(
                 tokens= tokens,
                 token_lengths= token_lengths,
@@ -51,13 +67,15 @@ class NaturalSpeech2(torch.nn.Module):
                 latents= latents,
                 latent_lengths= latent_lengths,
                 f0s= f0s,
+                mels= mels,
                 attention_priors= attention_priors
                 )
         else:   #  inference
             return self.Inference(
                 tokens= tokens,
                 token_lengths= token_lengths,
-                speech_prompts= speech_prompts
+                speech_prompts= speech_prompts,
+                ddim_steps= ddim_steps
                 )
 
     def Train(
@@ -69,6 +87,7 @@ class NaturalSpeech2(torch.nn.Module):
         latents: torch.FloatTensor,
         latent_lengths: torch.LongTensor,
         f0s: torch.FloatTensor,
+        mels: torch.Tensor,
         attention_priors: torch.Tensor,
         ):
         encodings = self.encoder(
@@ -82,7 +101,7 @@ class NaturalSpeech2(torch.nn.Module):
             token_embeddings= self.encoder.token_embedding(tokens).permute(0, 2, 1),
             encodings= encodings,
             encoding_lengths= token_lengths,
-            features= latents,
+            features= mels,
             feature_lengths= latent_lengths,
             attention_priors= attention_priors
             )
@@ -126,6 +145,7 @@ class NaturalSpeech2(torch.nn.Module):
         tokens: torch.LongTensor,
         token_lengths: torch.LongTensor,
         speech_prompts: torch.FloatTensor,
+        ddim_steps: Optional[int]= None
         ):
         encodings = self.encoder(
             tokens= tokens,
@@ -139,13 +159,23 @@ class NaturalSpeech2(torch.nn.Module):
             speech_prompts= speech_prompts,
             )
         
-        latents, _, _ = self.diffusion(
-            encodings= encodings_expand,
-            lengths= latent_lengths,
-            speech_prompts= speech_prompts,
-            )
+        if not ddim_steps is None and ddim_steps < self.hp.Diffusion.Max_Step:
+            latents = self.diffusion.DDIM(
+                encodings= encodings_expand,
+                lengths= latent_lengths,
+                speech_prompts= speech_prompts,
+                ddim_steps= ddim_steps
+                )        
+        else:
+            latents, _, _ = self.diffusion(
+                encodings= encodings_expand,
+                lengths= latent_lengths,
+                speech_prompts= speech_prompts,
+                )
         
-        # Performing VQ to correct the predictions of incomplete diffusion.
+        latents = (latents + 1.0) / 2.0 * (self.latent_max - self.latent_min) + self.latent_min
+
+        # Performing VQ to correct the predictions of incomplete diffusion.        
         latents = self.encodec.quantizer.encode(
             x= latents,
             sample_rate= self.encodec.frame_rate,
@@ -240,7 +270,7 @@ class FFT_Block(torch.nn.Module):
             queries= x,
             keys= x,
             values= x,
-            key_padding_mask= masks
+            key_padding_masks= masks
             )
         
         # FFN + Dropout + LayerNorm
@@ -248,7 +278,6 @@ class FFT_Block(torch.nn.Module):
         x = self.ffn(x, float_masks)
 
         return x * float_masks
-
 
 class FFN(torch.nn.Module):
     def __init__(
@@ -260,7 +289,7 @@ class FFN(torch.nn.Module):
         super().__init__()
         self.conv_0 = Conv1d(
             in_channels= channels,
-            out_channels= channels,
+            out_channels= channels * 4,
             kernel_size= kernel_size,
             padding= (kernel_size - 1) // 2,
             w_init_gain= 'relu'
@@ -268,7 +297,7 @@ class FFN(torch.nn.Module):
         self.relu = torch.nn.ReLU()
         self.dropout = torch.nn.Dropout(p= dropout_rate)
         self.conv_1 = Conv1d(
-            in_channels= channels,
+            in_channels= channels * 4,
             out_channels= channels,
             kernel_size= kernel_size,
             padding= (kernel_size - 1) // 2,
@@ -377,7 +406,7 @@ class Variacne_Block(torch.nn.Module):
         latent_lengths: Optional[torch.LongTensor]= None,
         ):
         duration_predictions = self.duration_predictor(
-            encodings= encodings,
+            encodings= encodings.detach(),
             lengths= encoding_lengths,
             speech_prompts= speech_prompts
             )   # [Batch, Enc_t]
@@ -395,7 +424,7 @@ class Variacne_Block(torch.nn.Module):
         encodings = encodings @ alignments  # [Batch, Enc_d, Latent_t]
 
         f0_predictions = self.f0_predictor(
-            encodings= encodings,
+            encodings= encodings.detach(),
             lengths= latent_lengths,
             speech_prompts= speech_prompts
             )   # [Batch, Latent_t]
@@ -443,7 +472,8 @@ class Variance_Predictor(torch.nn.Module):
                     in_channels= channels,
                     out_channels= channels,
                     kernel_size= conv_kernel_size,
-                    padding= (conv_kernel_size - 1) // 2
+                    padding= (conv_kernel_size - 1) // 2,
+                    w_init_gain= 'relu'
                     ))
                 conv_block.append(LayerNorm(num_features= channels))
                 conv_block.append(torch.nn.ReLU())
@@ -480,13 +510,12 @@ class Variance_Predictor(torch.nn.Module):
         encodings: [Batch, Enc_d, Enc_t or Feature_t]
         speech_prompts: [Batch, Enc_d, Prompt_t]
         '''
-        masks = Mask_Generate(lengths= lengths, max_length= torch.ones_like(encodings[0, 0]).sum()) # [Batch, Enc_t]
-        float_masks = (~masks).unsqueeze(1).float()   # float mask, [Batch, 1, Enc_t]
+        masks = (~Mask_Generate(lengths= lengths, max_length= torch.ones_like(encodings[0, 0]).sum())).unsqueeze(1).float()   # float mask, [Batch, 1, Enc_t]
         x = encodings
 
         for conv_blocks, attention in zip(self.conv_blocks, self.attentions):
             for block in conv_blocks:
-                x = block(x * float_masks) * float_masks
+                x = block(x * masks) * masks
 
             # Attention + Dropout + Residual + LayerNorm
             x = attention(
@@ -495,7 +524,7 @@ class Variance_Predictor(torch.nn.Module):
                 values= speech_prompts
                 )
 
-        x = self.projection(x * float_masks) * float_masks
+        x = self.projection(x * masks) * masks
 
         return x.squeeze(1)
 

@@ -5,7 +5,7 @@ from typing import Optional, List, Dict, Union
 from tqdm import tqdm
 
 from .LinearAttention import LinearAttention
-from .Layer import Conv1d, Lambda
+from .Layer import Conv1d, Lambda, LayerNorm
 
 class Diffusion(torch.nn.Module):
     def __init__(
@@ -267,7 +267,8 @@ class Denoiser(torch.nn.Module):
             Conv1d(
                 in_channels= self.hp.Audio_Codec.Size,
                 out_channels= self.hp.Diffusion.Size,
-                kernel_size= 1
+                kernel_size= 1,
+                w_init_gain= 'relu'
                 ),
             torch.nn.ReLU()
             )
@@ -307,14 +308,11 @@ class Denoiser(torch.nn.Module):
                 )
             )
 
-        self.wavenets = torch.nn.ModuleList([
-            WaveNet(
+        self.residual_blocks = torch.nn.ModuleList([
+            Residual_Block(
                 channels= self.hp.Diffusion.Size,
-                conv_stack= self.hp.Diffusion.WaveNet.Conv_Stack,
-                kernel_size= self.hp.Diffusion.WaveNet.Kernel_Size,
-                dilation_rate= self.hp.Diffusion.WaveNet.Dilation_Rate,
-                dropout_rate= self.hp.Diffusion.WaveNet.Dropout_Rate,
-                condition_channels= self.hp.Diffusion.Size,
+                kernel_size= 3,
+                condition_channels= self.hp.Diffusion.Size
                 )
             for _ in range(self.hp.Diffusion.Stack)
             ])
@@ -359,7 +357,6 @@ class Denoiser(torch.nn.Module):
             w_init_gain= 'zero'
             )
 
-
     def forward(
         self,
         latents: torch.Tensor,
@@ -373,14 +370,12 @@ class Denoiser(torch.nn.Module):
         encodings: [Batch, Enc_d, Audio_ct]
         diffusion_steps: [Batch]
         speech_prompts: [Batch, Prompt_d, Prompt_t]
-        Diffusion_d == Codec_d * 2
         '''
         masks= (~Mask_Generate(lengths, max_length= latents.size(2))).unsqueeze(1).float()    # [Batch, 1, Audio_ct]
 
         x = self.prenet(latents)  # [Batch, Diffusion_d, Audio_ct]
         encodings = self.encoding_ffn(encodings) # [Batch, Diffusion_d, Audio_ct]
         diffusion_steps = self.step_ffn(diffusion_steps) # [Batch, Diffusion_d, 1]
-        conditions = encodings + diffusion_steps    # [Batch, Diffusion_d, Audio_ct]
 
         speech_prompts = self.pre_attention(
             queries= self.pre_attention_query.expand(speech_prompts.size(0), -1, -1),
@@ -388,19 +383,22 @@ class Denoiser(torch.nn.Module):
             values= speech_prompts,
             )   # [Batch, Diffusion_d, Token_n]
 
-        for wavenet, attention, film in zip(self.wavenets, self.attentions, self.films):
-            x = wavenet(
+        skips_list = []
+        for residual_block, attention, film in zip(self.residual_blocks, self.attentions, self.films):
+            x, skips = residual_block(
                 x= x,
-                masks= masks,
-                conditions= conditions
-                )   # [Batch, Diffusion_d, Audio_ct]            
+                conditions= encodings,
+                diffusion_steps= diffusion_steps
+                )   # [Batch, Diffusion_d, Audio_ct]
             prompt_conditions = attention(
                 queries= x,
                 keys= speech_prompts,
                 values= speech_prompts,
-                )   # [Batch, Diffusion_d, Audio_ct]            
-            x = film(x, prompt_conditions, masks)   # [Batch, Diffusion_d, Audio_ct]
+                )   # [Batch, Diffusion_d, Audio_ct]
+            x = film(x, prompt_conditions, masks)   # [Batch, Diffusion_d, Audio_ct]            
+            skips_list.append(skips)
 
+        x = torch.stack(skips_list, dim= 0).sum(dim= 0) / math.sqrt(self.hp.Diffusion.Stack)
         x = self.postnet(x) * masks
 
         return x
@@ -422,83 +420,65 @@ class Diffusion_Embedding(torch.nn.Module):
 
         return embeddings
 
-class WaveNet(torch.nn.Module):
+class Residual_Block(torch.nn.Module):
     def __init__(
         self,
         channels: int,
-        conv_stack: int,
         kernel_size: int,
-        dilation_rate: int,
-        dropout_rate: float= 0.0,
-        condition_channels: Optional[int]= None,
+        condition_channels: int
         ):
         super().__init__()
-        self.channels = channels
-        self.conv_stack = conv_stack
-        self.use_condition = not condition_channels is None
-
-        def weight_norm_initialize_weight(module):
-            if 'Conv' in module.__class__.__name__:
-                module.weight.data.normal_(0.0, 0.01)
-
-        if self.use_condition:
-            self.condition = torch.nn.utils.weight_norm(Conv1d(
-                in_channels= condition_channels,
-                out_channels= channels * conv_stack * 2,
-                kernel_size= 1
-                ))
-            self.condition.apply(weight_norm_initialize_weight)
+        self.in_channels = channels
         
-        self.input_convs = torch.nn.ModuleList()
-        self.residual_and_skip_convs = torch.nn.ModuleList()
-        for index in range(conv_stack):
-            dilation = dilation_rate ** index
-            padding = (kernel_size - 1) * dilation // 2
-            self.input_convs.append(torch.nn.utils.weight_norm(Conv1d(
-                in_channels= channels,
-                out_channels= channels * 2,
-                kernel_size= kernel_size,
-                dilation= dilation,
-                padding= padding
-                )))
-            self.residual_and_skip_convs.append(torch.nn.utils.weight_norm(Conv1d(
-                in_channels= channels,
-                out_channels= channels * 2,
-                kernel_size= 1
-                )))
+        self.condition = Conv1d(
+            in_channels= condition_channels,
+            out_channels= channels * 2,
+            kernel_size= 1,
+            w_init_gain= 'linear'
+            )
+        self.diffusion_step = Conv1d(
+            in_channels= channels,
+            out_channels= channels,
+            kernel_size= 1,
+            w_init_gain= 'linear'
+            )
 
-        self.dropout = torch.nn.Dropout(p= dropout_rate)
-        
-        self.input_convs.apply(weight_norm_initialize_weight)
-        self.residual_and_skip_convs.apply(weight_norm_initialize_weight)
+        self.conv = Conv1d(
+            in_channels= channels,
+            out_channels= channels * 2,
+            kernel_size= kernel_size,
+            padding= kernel_size // 2,
+            w_init_gain= 'gate'
+            )
+
+        self.projection = Conv1d(
+            in_channels= channels,
+            out_channels= channels * 2,
+            kernel_size= 1,
+            w_init_gain= 'tanh'
+            )
+        self.norm = LayerNorm(num_features= channels)
 
     def forward(
         self,
         x: torch.Tensor,
-        masks: torch.Tensor,
-        conditions: Optional[torch.Tensor]= None,    
+        conditions: torch.Tensor,
+        diffusion_steps: torch.Tensor
         ):
-        if self.use_condition:
-            conditions_list = self.condition(conditions).chunk(chunks= self.conv_stack, dim= 1)  # [Batch, Calc_d * 2, Time] * Stack
-        else:
-            conditions_list = [torch.zeros(
-                size= (x.size(0), self.channels * 2, x.size(2)),
-                dtype= x.dtype,
-                device= x.device
-                )] * self.conv_stack
+        residuals = x
 
-        skips_list = []
-        for in_conv, conditions, residual_and_skip_conv in zip(self.input_convs, conditions_list, self.residual_and_skip_convs):
-            ins = in_conv(x)
-            acts = Fused_Gate(ins + conditions)
-            acts = self.dropout(acts)
-            residuals, skips = residual_and_skip_conv(acts).chunk(chunks= 2, dim= 1)
-            x = (x + residuals) * masks
-            skips_list.append(skips)
+        conditions = self.condition(conditions)
+        diffusion_steps = self.diffusion_step(diffusion_steps)
 
-        skips = torch.stack(skips_list, dim= 1).sum(dim= 1) * masks
+        x = self.conv(x + diffusion_steps) + conditions
+        x = Fused_Gate(x)
 
-        return skips
+        x = self.projection(x)
+        x, skips = x.chunk(chunks= 2, dim= 1)
+        x = self.norm(x + residuals)
+
+        return x, skips
+
 
 @torch.jit.script
 def Fused_Gate(x):

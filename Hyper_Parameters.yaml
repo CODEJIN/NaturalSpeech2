@@ -1,11 +1,11 @@
 Sound:
     Frame_Shift: 320    # Encodec's frame
     Sample_Rate: 16000
+    Mel_Dim: 80
     F0_Min: 65
     F0_Max: 2094
 
 Tokens: 55
-GE2E_Size: 256
 
 Encoder:
     Size: 512
@@ -50,14 +50,9 @@ F0_Predictor:
 
 Diffusion:
     Max_Step: 1000
-    Size: 512   # == Audio_Codec.Size * 2
+    Size: 512
     Kernel_Size: 5
-    Stack: 10
-    WaveNet:
-        Conv_Stack: 4
-        Kernel_Size: 3        
-        Dilation_Rate: 2
-        Dropout_Rate: 0.2
+    Stack: 40
     Attention:
         Query_Token: 32
         Query_Size: 512
@@ -83,14 +78,10 @@ Audio_Codec:
     #     Channels: [128, 64, 32, 1]
     #     Strides: [5, 5, 4, 2]   # cumulative product == codec frame
 
-
-
 Token_Path: 'D:/Datasets/22K.NaturalSpeech2/Token.yaml'
-GE2E_Path: 'D:/Datasets/22K.NaturalSpeech2/GE2E.pickle'
-Spectrogram_Range_Info_Path: 'D:/Datasets/22K.NaturalSpeech2/Spectrogram_Range_Info.yaml'
+Latent_Range_Info_Path: 'D:/Datasets/22K.NaturalSpeech2/Latent_Range_Info.yaml'
 Mel_Range_Info_Path: 'D:/Datasets/22K.NaturalSpeech2/Mel_Range_Info.yaml'
 F0_Info_Path: 'D:/Datasets/22K.NaturalSpeech2/F0_Info.yaml'
-Energy_Info_Path: 'D:/Datasets/22K.NaturalSpeech2/Energy_Info.yaml'
 Speaker_Info_Path: 'D:/Datasets/22K.NaturalSpeech2/Speaker_Info.yaml'
 Emotion_Info_Path: 'D:/Datasets/22K.NaturalSpeech2/Emotion_Info.yaml'
 Language_Info_Path: 'D:/Datasets/22K.NaturalSpeech2/Language_Info.yaml'
@@ -119,18 +110,11 @@ Train:
             Min: 10
             Max: 200
     Num_Workers: 0
-    Batch_Size: 8
+    Batch_Size: 12
     Segment_Size: 64
     Learning_Rate:
         Initial: 5.0e-4
         Decay: 0.999875
-        Lambda:
-            GAN_Forward: 0.1
-            STFT: 45.0
-            F0: 45.0
-            KLD_Forward: 0.001
-            Token_CTC: 45.0
-            Feature_Map: 2.0
     ADAM:
         Beta1: 0.8
         Beta2: 0.99

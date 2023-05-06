@@ -10,6 +10,8 @@ from typing import List, Tuple, Dict, Union, Optional
 from phonemizer import phonemize
 from unidecode import unidecode
 
+from meldataset import mel_spectrogram
+
 from encodec import EncodecModel
 
 from Arg_Parser import Recursive_Parse
@@ -95,6 +97,7 @@ def Pattern_Generate(
     path,
     sample_rate: int,
     hop_size: int,
+    num_mels: int,
     f0_min: int,
     f0_max: int,
     ):
@@ -103,6 +106,18 @@ def Pattern_Generate(
     audio = audio[:audio.shape[0] - (audio.shape[0] % hop_size)]
 
     latents = encodec.quantizer.decode(encodec.encode(torch.from_numpy(audio)[None, None])[0][0].permute(1, 0, 2)).squeeze(0).numpy()  # [128, Audio_t / 320]
+
+    mel = mel_spectrogram(
+        y= torch.from_numpy(audio).float().unsqueeze(0),
+        n_fft= hop_size * 4,
+        num_mels= num_mels,
+        sampling_rate= sample_rate,
+        hop_size= hop_size,
+        win_size= hop_size * 4,
+        fmin= 0,
+        fmax= None,
+        center= False
+        ).squeeze(0).numpy()
 
     f0 = rapt(
         x= audio * 32768,
@@ -114,24 +129,30 @@ def Pattern_Generate(
         )
     
     if abs(latents.shape[1] - f0.shape[0]) > 1:
-        return None, None, None
+        return None, None, None, None
     elif latents.shape[1] > f0.shape[0]:
         f0 = np.pad(f0, [0, latents.shape[1] - f0.shape[0]], constant_values= 0.0)
     else:   # mel.shape[1] < f0.shape[0]:
         audio = np.pad(audio, [0, (f0.shape[0] - latents.shape[1]) * hop_size])
         latents = np.pad(latents, [[0, 0], [0, f0.shape[0] - latents.shape[1]]], mode= 'edge')
+
+    if mel.shape[1] - f0.shape[0] < 0 or mel.shape[1] - f0.shape[0] > 1:
+        return None, None, None, None
+    else:
+        mel = mel[:, :f0.shape[0]]
         
     nonsilence_frames = np.where(f0 > 0.0)[0]
     if len(nonsilence_frames) < 2:
-        return None, None, None
+        return None, None, None, None
     initial_silence_frame, *_, last_silence_frame = nonsilence_frames
     initial_silence_frame = max(initial_silence_frame - 11, 0)
     last_silence_frame = min(last_silence_frame + 11, f0.shape[0])
     audio = audio[initial_silence_frame * hop_size:last_silence_frame * hop_size]
     latents = latents[:, initial_silence_frame:last_silence_frame]
+    mel = mel[:, initial_silence_frame:last_silence_frame]
     f0 = f0[initial_silence_frame:last_silence_frame]
     
-    return audio.astype(np.float32), latents.astype(np.float32), f0.astype(np.float32)
+    return audio.astype(np.float32), latents.astype(np.float32), mel.astype(np.float32), f0.astype(np.float32)
 
 def Pattern_File_Generate(path: str, speaker: str, emotion: str, language: str, gender: str, dataset: str, text: str, pronunciation: str, tag: str='', eval: bool= False):
     pattern_path = hp.Train.Eval_Pattern.Path if eval else hp.Train.Train_Pattern.Path
@@ -148,10 +169,11 @@ def Pattern_File_Generate(path: str, speaker: str, emotion: str, language: str, 
         return
     file = os.path.join(pattern_path, dataset, speaker, file).replace("\\", "/")
 
-    audio, latent, f0 = Pattern_Generate(
+    audio, latent, mel, f0 = Pattern_Generate(
         path= path,
         sample_rate= hp.Sound.Sample_Rate,
         hop_size= hp.Sound.Frame_Shift,
+        num_mels= hp.Sound.Mel_Dim,
         f0_min= hp.Sound.F0_Min,
         f0_max= hp.Sound.F0_Max
         )
@@ -161,6 +183,7 @@ def Pattern_File_Generate(path: str, speaker: str, emotion: str, language: str, 
     new_Pattern_dict = {
         'Audio': audio,
         'Latent': latent,
+        'Mel': mel,
         'F0': f0,
         'Speaker': speaker,
         'Emotion': emotion,
@@ -721,6 +744,8 @@ def Metadata_Generate(eval: bool= False):
     pattern_path = hp.Train.Eval_Pattern.Path if eval else hp.Train.Train_Pattern.Path
     metadata_File = hp.Train.Eval_Pattern.Metadata_File if eval else hp.Train.Train_Pattern.Metadata_File
 
+    latent_range_dict = {}
+    mel_range_dict = {}
     f0_dict = {}
     speakers = []
     emotions = []
@@ -734,6 +759,7 @@ def Metadata_Generate(eval: bool= False):
         'File_List': [],
         'Audio_Length_Dict': {},
         'Latent_Length_Dict': {},
+        'Mel_Length_Dict': {},
         'F0_Length_Dict': {},
         'Speaker_Dict': {},
         'Emotion_Dict': {},
@@ -762,6 +788,7 @@ def Metadata_Generate(eval: bool= False):
                     continue
                 new_metadata_dict['Audio_Length_Dict'][file] = pattern_dict['Audio'].shape[0]
                 new_metadata_dict['Latent_Length_Dict'][file] = pattern_dict['Latent'].shape[1]
+                new_metadata_dict['Mel_Length_Dict'][file] = pattern_dict['Mel'].shape[1]
                 new_metadata_dict['F0_Length_Dict'][file] = pattern_dict['F0'].shape[0]
                 new_metadata_dict['Speaker_Dict'][file] = pattern_dict['Speaker']
                 new_metadata_dict['Emotion_Dict'][file] = pattern_dict['Emotion']
@@ -772,9 +799,18 @@ def Metadata_Generate(eval: bool= False):
                 new_metadata_dict['File_List_by_Speaker_Dict'][pattern_dict['Speaker']].append(file)
                 new_metadata_dict['Text_Length_Dict'][file] = len(pattern_dict['Text'])
 
+                if not pattern_dict['Speaker'] in latent_range_dict.keys():
+                    latent_range_dict[pattern_dict['Speaker']] = {'Min': math.inf, 'Max': -math.inf}
+                if not pattern_dict['Speaker'] in mel_range_dict.keys():
+                    mel_range_dict[pattern_dict['Speaker']] = {'Min': math.inf, 'Max': -math.inf}
                 if not pattern_dict['Speaker'] in f0_dict.keys():
                     f0_dict[pattern_dict['Speaker']] = []
                 
+                latent_range_dict[pattern_dict['Speaker']]['Min'] = min(latent_range_dict[pattern_dict['Speaker']]['Min'], pattern_dict['Latent'].min().item())
+                latent_range_dict[pattern_dict['Speaker']]['Max'] = max(latent_range_dict[pattern_dict['Speaker']]['Max'], pattern_dict['Latent'].max().item())
+                mel_range_dict[pattern_dict['Speaker']]['Min'] = min(mel_range_dict[pattern_dict['Speaker']]['Min'], pattern_dict['Mel'].min().item())
+                mel_range_dict[pattern_dict['Speaker']]['Max'] = max(mel_range_dict[pattern_dict['Speaker']]['Max'], pattern_dict['Mel'].max().item())
+
                 f0_dict[pattern_dict['Speaker']].append(pattern_dict['F0'])
                 speakers.append(pattern_dict['Speaker'])
                 emotions.append(pattern_dict['Emotion'])                
@@ -792,7 +828,16 @@ def Metadata_Generate(eval: bool= False):
     with open(os.path.join(pattern_path, metadata_File.upper()).replace("\\", "/"), 'wb') as f:
         pickle.dump(new_metadata_dict, f, protocol= 4)
 
-    if not eval:        
+    if not eval:
+        yaml.dump(
+            latent_range_dict,
+            open(hp.Latent_Range_Info_Path, 'w')
+            )
+        yaml.dump(
+            mel_range_dict,
+            open(hp.Mel_Range_Info_Path, 'w')
+            )
+        
         f0_info_dict = {}
         for speaker, f0_list in f0_dict.items():
             f0 = np.hstack(f0_list)

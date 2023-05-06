@@ -1,4 +1,5 @@
 import torch
+from typing import Optional
 
 from .Layer import Conv1d, LayerNorm
 
@@ -10,7 +11,7 @@ class LinearAttention(torch.nn.Module):
         value_channels: int,
         calc_channels: int,
         num_heads: int,
-        dropout_rate: float= 0.1,
+        dropout_rate: float= 0.0,
         use_scale: bool= True,
         use_residual: bool= True,
         use_norm: bool= True
@@ -63,13 +64,15 @@ class LinearAttention(torch.nn.Module):
         queries: torch.Tensor,
         keys: torch.Tensor,
         values: torch.Tensor,
+        key_padding_masks: Optional[torch.Tensor]= None,
         *args,
         **kwargs
         ):
         '''
         queries: [Batch, Enc_d, Enc_t]
-        keys: [Batch, Enc_d, Enc_t]
-        values: [Batch, Enc_d, Enc_t]
+        keys: [Batch, Enc_d, Key_t]
+        values: [Batch, Enc_d, Key_t]
+        key_padding_masks: [Batch, Key_t]
         '''
         residuals = queries
 
@@ -81,7 +84,10 @@ class LinearAttention(torch.nn.Module):
         keys = keys.view(keys.size(0), self.num_heads, keys.size(1) // self.num_heads, keys.size(2))    # [Batch, Head, Calc_d // Head, Enc_t]
         values = values.view(values.size(0), self.num_heads, values.size(1) // self.num_heads, values.size(2))    # [Batch, Head, Calc_d // Head, Enc_t]
         
-        keys = (keys + 1e-3).softmax(dim= 3)
+        if not key_padding_masks is None:
+            keys.masked_fill_(key_padding_masks[:, None, None, :], -1e+4)
+
+        keys = (keys + 1e-4).softmax(dim= 3)
 
         contexts = keys @ values.permute(0, 1, 3, 2)   # [Batch, Head, Calc_d // Head, Calc_d // Head]
         contexts = contexts.permute(0, 1, 3, 2) @ queries   # [Batch, Head, Calc_d // Head, Enc_t]
