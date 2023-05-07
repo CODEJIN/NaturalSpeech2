@@ -28,7 +28,7 @@ Speech_Prompter:
             Dropout_Rate: 0.2
 
 Duration_Predictor:
-    Stack: 1
+    Stack: 10
     Attention:
         Head: 8
         Dropout_Rate: 0.0
@@ -38,7 +38,7 @@ Duration_Predictor:
         Dropout_Rate: 0.2
 
 F0_Predictor:
-    Stack: 1
+    Stack: 10
     Attention:
         Head: 8
         Dropout_Rate: 0.0
@@ -94,7 +94,7 @@ Train:
             Min: 10
             Max: 200
     Num_Workers: 0
-    Batch_Size: 32
+    Batch_Size: 16
     Segment_Size: 64
     Learning_Rate:
         Initial: 1.0e-4

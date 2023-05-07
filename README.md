@@ -130,4 +130,4 @@ CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 OMP_NUM_THREADS=32 python -m torch.distribu
 * I recommend to check the [multi_gpu.sh](./multi_gpu.sh).
 
 # TODO
-* F0(pitch) apply
+* Verification
