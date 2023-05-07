@@ -346,6 +346,7 @@ class Trainer:
                 mels= mels,
                 attention_priors= attention_priors
                 )
+            print(durations[0])
 
             with torch.cuda.amp.autocast(enabled= False):
                 token_masks = Mask_Generate(
@@ -425,8 +426,8 @@ class Trainer:
             target_audio_length = target_latent_length * self.hp.Sound.Frame_Shift
             prediction_audio_length = prediction_latent_length * self.hp.Sound.Frame_Shift
 
-            target_audio = target_audios[0, :target_audio_length]
-            prediction_audio = prediction_audios[0, :prediction_audio_length]
+            target_audio = target_audios[0, :target_audio_length].clamp(-1.0, 1.0)
+            prediction_audio = prediction_audios[0, :prediction_audio_length].clamp(-1.0, 1.0)
 
             target_feature = mel_spectrogram(
                 target_audio.unsqueeze(0),
@@ -456,7 +457,7 @@ class Trainer:
             prediction_f0 = prediction_f0s[0, :prediction_latent_length].cpu().numpy()
 
             prediction_duration = prediction_durations[0, :token_length]
-            prediction_duration = torch.arange(prediction_duration.size(0)).repeat_interleave(prediction_duration.cpu()).cpu().numpy()
+            prediction_duration = torch.arange(prediction_duration.size(0)).repeat_interleave(prediction_duration.cpu())[:prediction_latent_length].cpu().numpy()
 
             image_dict = {
                 'Feature/Target': (target_feature, None, 'auto', None, None, None),

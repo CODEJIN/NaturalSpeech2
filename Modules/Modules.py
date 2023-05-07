@@ -105,7 +105,7 @@ class NaturalSpeech2(torch.nn.Module):
             feature_lengths= latent_lengths,
             attention_priors= attention_priors
             )
-        
+
         encodings_expand, duration_predictions, f0_predictions, _, _, _ = self.variance_block(
             encodings= encodings,
             encoding_lengths= token_lengths,
@@ -121,7 +121,7 @@ class NaturalSpeech2(torch.nn.Module):
             lengths= latent_lengths
             )        
         encodings_expand_slice = encodings_expand_slice.permute(0, 2, 1)
-           
+        
         latents_slice, _ = self.segment(
             patterns= latents.permute(0, 2, 1),
             segment_size= self.hp.Train.Segment_Size,
@@ -335,13 +335,17 @@ class Speech_Prompter(torch.nn.Module):
         super().__init__()
         self.hp = hyper_parameters
 
-        self.prenet = Conv1d(
-            in_channels= self.hp.Audio_Codec.Size,
-            out_channels= self.hp.Speech_Prompter.Size,
-            kernel_size= 1,
-            w_init_gain= 'linear'
+        self.prenet = torch.nn.Sequential(
+            Conv1d(
+                in_channels= self.hp.Audio_Codec.Size,
+                out_channels= self.hp.Speech_Prompter.Size,
+                kernel_size= 1,
+                w_init_gain= 'relu'
+                ),
+            LayerNorm(num_features= self.hp.Speech_Prompter.Size),
+            torch.nn.ReLU()
             )
-
+        
         self.blocks = torch.nn.ModuleList([
             FFT_Block(
                 channels= self.hp.Speech_Prompter.Size,
@@ -406,14 +410,17 @@ class Variacne_Block(torch.nn.Module):
         latent_lengths: Optional[torch.LongTensor]= None,
         ):
         duration_predictions = self.duration_predictor(
-            encodings= encodings.detach(),
+            encodings= encodings,
             lengths= encoding_lengths,
             speech_prompts= speech_prompts
             )   # [Batch, Enc_t]
         
         if durations is None:
             durations = duration_predictions.ceil().long() # [Batch, Enc_t]
-            latent_lengths = durations.sum(dim= 1)
+            latent_lengths = torch.stack([
+                duration[:length - 1].sum() + 1
+                for duration, length in zip(durations, encoding_lengths)
+                ], dim= 0)
             max_duration_sum = latent_lengths.max()
 
             for duration, length in zip(durations, encoding_lengths):
@@ -424,7 +431,7 @@ class Variacne_Block(torch.nn.Module):
         encodings = encodings @ alignments  # [Batch, Enc_d, Latent_t]
 
         f0_predictions = self.f0_predictor(
-            encodings= encodings.detach(),
+            encodings= encodings,
             lengths= latent_lengths,
             speech_prompts= speech_prompts
             )   # [Batch, Latent_t]
@@ -466,7 +473,7 @@ class Variance_Predictor(torch.nn.Module):
         
         self.conv_blocks = torch.nn.ModuleList()
         for index in range(stack):
-            conv_block = torch.nn.ModuleList()
+            conv_block = torch.nn.Sequential()
             for conv_block_index in range(conv_stack_in_stack):
                 conv_block.append(Conv1d(
                     in_channels= channels,
@@ -514,12 +521,11 @@ class Variance_Predictor(torch.nn.Module):
         x = encodings
 
         for conv_blocks, attention in zip(self.conv_blocks, self.attentions):
-            for block in conv_blocks:
-                x = block(x * masks) * masks
+            x = conv_blocks(x * masks) + x
 
             # Attention + Dropout + Residual + LayerNorm
             x = attention(
-                queries= x,
+                queries= x * masks,
                 keys= speech_prompts,
                 values= speech_prompts
                 )

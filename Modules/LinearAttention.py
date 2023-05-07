@@ -77,8 +77,8 @@ class LinearAttention(torch.nn.Module):
         residuals = queries
 
         queries = self.query(queries)
-        keys = self.query(keys)
-        values = self.query(values)
+        keys = self.key(keys)
+        values = self.value(values)
 
         queries = queries.view(queries.size(0), self.num_heads, queries.size(1) // self.num_heads, queries.size(2))    # [Batch, Head, Calc_d // Head, Enc_t]
         keys = keys.view(keys.size(0), self.num_heads, keys.size(1) // self.num_heads, keys.size(2))    # [Batch, Head, Calc_d // Head, Enc_t]

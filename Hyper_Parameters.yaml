@@ -28,7 +28,7 @@ Speech_Prompter:
             Dropout_Rate: 0.2
 
 Duration_Predictor:
-    Stack: 10
+    Stack: 1
     Attention:
         Head: 8
         Dropout_Rate: 0.0
@@ -38,7 +38,7 @@ Duration_Predictor:
         Dropout_Rate: 0.2
 
 F0_Predictor:
-    Stack: 10
+    Stack: 1
     Attention:
         Head: 8
         Dropout_Rate: 0.0
@@ -78,19 +78,19 @@ Audio_Codec:
     #     Channels: [128, 64, 32, 1]
     #     Strides: [5, 5, 4, 2]   # cumulative product == codec frame
 
-Token_Path: 'D:/Datasets/22K.NaturalSpeech2/Token.yaml'
-Latent_Range_Info_Path: 'D:/Datasets/22K.NaturalSpeech2/Latent_Range_Info.yaml'
-Mel_Range_Info_Path: 'D:/Datasets/22K.NaturalSpeech2/Mel_Range_Info.yaml'
-F0_Info_Path: 'D:/Datasets/22K.NaturalSpeech2/F0_Info.yaml'
-Speaker_Info_Path: 'D:/Datasets/22K.NaturalSpeech2/Speaker_Info.yaml'
-Emotion_Info_Path: 'D:/Datasets/22K.NaturalSpeech2/Emotion_Info.yaml'
-Language_Info_Path: 'D:/Datasets/22K.NaturalSpeech2/Language_Info.yaml'
-Gender_Info_Path: 'D:/Datasets/22K.NaturalSpeech2/Gender_Info.yaml'
-Language_and_Gender_Info_by_Speaker_Path: 'D:/Datasets/22K.NaturalSpeech2/Language_and_Gender_Info_by_Speaker.yaml'
+Token_Path: 'D:/Datasets/22K.NaturalSpeech2.LJ/Token.yaml'
+Latent_Range_Info_Path: 'D:/Datasets/22K.NaturalSpeech2.LJ/Latent_Range_Info.yaml'
+Mel_Range_Info_Path: 'D:/Datasets/22K.NaturalSpeech2.LJ/Mel_Range_Info.yaml'
+F0_Info_Path: 'D:/Datasets/22K.NaturalSpeech2.LJ/F0_Info.yaml'
+Speaker_Info_Path: 'D:/Datasets/22K.NaturalSpeech2.LJ/Speaker_Info.yaml'
+Emotion_Info_Path: 'D:/Datasets/22K.NaturalSpeech2.LJ/Emotion_Info.yaml'
+Language_Info_Path: 'D:/Datasets/22K.NaturalSpeech2.LJ/Language_Info.yaml'
+Gender_Info_Path: 'D:/Datasets/22K.NaturalSpeech2.LJ/Gender_Info.yaml'
+Language_and_Gender_Info_by_Speaker_Path: 'D:/Datasets/22K.NaturalSpeech2.LJ/Language_and_Gender_Info_by_Speaker.yaml'
 Train:
     Pattern_Cache: false
     Train_Pattern:
-        Path: 'D:/Datasets/22K.NaturalSpeech2/Train'
+        Path: 'D:/Datasets/22K.NaturalSpeech2.LJ/Train'
         Metadata_File: 'METADATA.PICKLE'
         Feature_Length:
             Min: 100
@@ -101,7 +101,7 @@ Train:
         Accumulated_Dataset_Epoch: 1 # This is to prevent slow down from torch.utils.data.DataLoader when the number of patterns is small.
         Augmentation_Ratio: 0.10
     Eval_Pattern:
-        Path: 'D:/Datasets/22K.NaturalSpeech2/Eval'
+        Path: 'D:/Datasets/22K.NaturalSpeech2.LJ/Eval'
         Metadata_File: 'METADATA.PICKLE'
         Feature_Length:
             Min: 100
@@ -123,9 +123,9 @@ Train:
     Max_Step: 1000000
     Checkpoint_Save_Interval: 5000
     Logging_Interval: 1
-    Evaluation_Interval: 1000
+    Evaluation_Interval: 100
     Inference_Interval: 5000
-    Initial_Inference: true
+    Initial_Inference: false # true
     Inference_in_Train:
         Text: [
             'Do not kill the goose that lays the golden eggs.',
@@ -152,12 +152,12 @@ Weights_and_Biases:
     Use: false
     Project: 'NaturalSpeech2'
     Entity: 'codejin'
-    Name: 'Test'
+    Name: 'LJ'
     Save_Checkpoint:
         Use: false
         Interval: 50000 # Unlike local, The capacity of WandB is small.
 
-Use_Mixed_Precision: true  # Don't use mixed precision in this model.
+Use_Mixed_Precision: false  # Don't use mixed precision in this model.
 Use_Multi_GPU: false
 Device: '0'
 # Use_Multi_GPU: true

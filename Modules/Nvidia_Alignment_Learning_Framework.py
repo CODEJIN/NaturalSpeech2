@@ -109,7 +109,6 @@ class ConvAttention(torch.nn.Module):
         self.softmax = torch.nn.Softmax(dim=3)
         self.log_softmax = torch.nn.LogSoftmax(dim=3)
         self.query_proj = Invertible1x1ConvLUS(n_mel_channels)
-        self.attn_proj = torch.nn.Conv2d(n_att_channels, 1, kernel_size=1)
         self.align_query_enc_type = align_query_enc_type
         self.use_query_proj = bool(use_query_proj)
 
@@ -227,15 +226,14 @@ class ConvAttention(torch.nn.Module):
         # compute log likelihood from a gaussian
         attn = -0.0005 * attn.sum(1, keepdim=True)
         if attn_prior is not None:
-            attn = self.log_softmax(attn) + torch.log(attn_prior[:, None]+1e-8)
+            attn = self.log_softmax(attn) + torch.log(attn_prior[:, None] + 1e-4)
 
         attn_logprob = attn.clone()
 
         if mask is not None:
-            attn.data.masked_fill_(mask.permute(0, 2, 1).unsqueeze(2),
-                                   -float("inf"))
+            attn.data.masked_fill_(mask.permute(0, 2, 1).unsqueeze(2), -1e+4)
 
-        attn = self.softmax(attn)  # Softmax along T2
+        attn = self.softmax(attn + 1e-4)  # Softmax along T2
         return attn, attn_logprob
 
 
@@ -380,7 +378,7 @@ class AttentionCTCLoss(torch.nn.Module):
             dtype=torch.long)
         attn_logprob.masked_fill_(
             key_inds.view(1,1,-1) > key_lens.view(1,-1,1), # key_inds >= key_lens+1
-            -float("inf"))
+            -1e+4)
         attn_logprob = self.log_softmax(attn_logprob)
 
         # Target sequences
@@ -391,13 +389,14 @@ class AttentionCTCLoss(torch.nn.Module):
         cost = self.CTCLoss(
             attn_logprob, target_seqs,
             input_lengths=query_lens, target_lengths=key_lens)
+
         return cost
 
 class AttentionBinarizationLoss(torch.nn.Module):
     def __init__(self):
         super(AttentionBinarizationLoss, self).__init__()
 
-    def forward(self, hard_attention, soft_attention, eps=1e-12):
+    def forward(self, hard_attention, soft_attention, eps=1e-4):
         log_sum = torch.log(torch.clamp(soft_attention[hard_attention == 1],
                             min=eps)).sum()
         return -log_sum / hard_attention.sum()

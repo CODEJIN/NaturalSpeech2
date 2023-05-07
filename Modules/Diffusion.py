@@ -327,8 +327,10 @@ class Denoiser(torch.nn.Module):
             )
 
         self.pre_attention_query = torch.nn.Parameter(
-            torch.randn(1, self.hp.Diffusion.Attention.Query_Size, self.hp.Diffusion.Attention.Query_Token)
+            torch.empty(1, self.hp.Diffusion.Attention.Query_Size, self.hp.Diffusion.Attention.Query_Token)
             )
+        query_variance = math.sqrt(3.0) * math.sqrt(2.0 / (self.hp.Diffusion.Attention.Query_Size + self.hp.Diffusion.Attention.Query_Token))
+        self.pre_attention_query.data.uniform_(-query_variance, query_variance)
         
         self.attentions = torch.nn.ModuleList([
             LinearAttention(
