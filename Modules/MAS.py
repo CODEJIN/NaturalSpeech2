@@ -39,7 +39,8 @@ class Monotonic_Alignment_Search(torch.nn.Module):
         encoding_masks = (~Mask_Generate(lengths= encoding_lengths, max_length= torch.ones_like(encodings[0, 0]).sum())).unsqueeze(1).float()
         feature_masks = (~Mask_Generate(lengths= feature_lengths, max_length= torch.ones_like(features[0, 0]).sum())).unsqueeze(1).float()
 
-        means, log_stds = (self.vae_projection(encodings * encoding_masks) * encoding_masks).chunk(chunks= 2, dim= 1)
+        means, stds = (self.vae_projection(encodings * encoding_masks) * encoding_masks).chunk(chunks= 2, dim= 1)
+        log_stds = torch.nn.functional.softplus(stds).log()
 
         with torch.no_grad():
             # negative cross-entropy
@@ -58,6 +59,7 @@ class Monotonic_Alignment_Search(torch.nn.Module):
             encoding_lengths= encoding_lengths,
             feature_lengths= feature_lengths
             )
+        alignments = alignments.permute(0, 2, 1)
 
         return alignments, durations, means, log_stds
 

@@ -110,11 +110,15 @@ Train:
             Min: 10
             Max: 200
     Num_Workers: 0
-    Batch_Size: 12
+    Batch_Size: 32
     Segment_Size: 64
     Learning_Rate:
-        Initial: 5.0e-4
+        Initial: 1.0e-4
         Decay: 0.999875
+        Lambda:
+            Diffusion: 45.0
+            Duration: 45.0
+            F0: 45.0
     ADAM:
         Beta1: 0.8
         Beta2: 0.99
@@ -123,9 +127,10 @@ Train:
     Max_Step: 1000000
     Checkpoint_Save_Interval: 5000
     Logging_Interval: 1
-    Evaluation_Interval: 100
+    Evaluation_Interval: 1000
     Inference_Interval: 5000
-    Initial_Inference: false # true
+    # Initial_Inference: true
+    Initial_Inference: false
     Inference_in_Train:
         Text: [
             'Do not kill the goose that lays the golden eggs.',
