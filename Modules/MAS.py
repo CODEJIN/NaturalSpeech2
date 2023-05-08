@@ -5,15 +5,26 @@ import math
 from numba import jit
 from typing import Optional, List, Dict, Tuple, Union
 
+from .LinearAttention import LinearAttention
 from .Layer import Conv1d, Linear, Lambda, Residual, LayerNorm
 
 class Monotonic_Alignment_Search(torch.nn.Module): 
     def __init__(
         self,
-        in_channels: int,
+        in_channels: int,        
         feature_size: int,
+        condition_channels: int,
+        condition_attenion_head: int
         ):
         super().__init__()
+
+        self.attention = LinearAttention(
+            query_channels= in_channels,
+            key_channels= condition_channels, 
+            value_channels= condition_channels,
+            calc_channels= in_channels,
+            num_heads= condition_attenion_head
+            )
 
         self.vae_projection = Conv1d(
             in_channels= in_channels,
@@ -27,8 +38,9 @@ class Monotonic_Alignment_Search(torch.nn.Module):
         self,
         encodings: torch.Tensor,
         encoding_lengths: torch.Tensor,
+        conditions: torch.Tensor,
         features: torch.Tensor,
-        feature_lengths: torch.Tensor
+        feature_lengths: torch.Tensor,
         ):
         '''
         encodings: [Batch, Enc_d, Enc_t]
@@ -38,6 +50,12 @@ class Monotonic_Alignment_Search(torch.nn.Module):
         '''
         encoding_masks = (~Mask_Generate(lengths= encoding_lengths, max_length= torch.ones_like(encodings[0, 0]).sum())).unsqueeze(1).float()
         feature_masks = (~Mask_Generate(lengths= feature_lengths, max_length= torch.ones_like(features[0, 0]).sum())).unsqueeze(1).float()
+
+        encodings = self.attention(
+            queries= encodings,
+            keys= conditions,
+            values= conditions
+            )
 
         means, stds = (self.vae_projection(encodings * encoding_masks) * encoding_masks).chunk(chunks= 2, dim= 1)
         log_stds = torch.nn.functional.softplus(stds).log()

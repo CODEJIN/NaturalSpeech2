@@ -27,7 +27,9 @@ class NaturalSpeech2(torch.nn.Module):
 
         self.monotonic_alignment_search = Monotonic_Alignment_Search(
             in_channels= self.hp.Encoder.Size,
-            feature_size= self.hp.Sound.Mel_Dim
+            feature_size= self.hp.Sound.Mel_Dim,
+            condition_channels= self.hp.Speech_Prompter.Size,
+            condition_attenion_head= self.hp.Monotonic_Alignment_Search.Condition_Attention_Head
             )
 
         self.variance_block = Variacne_Block(self.hp)
@@ -100,6 +102,7 @@ class NaturalSpeech2(torch.nn.Module):
         alignments, durations, mas_means, mas_log_stds = self.monotonic_alignment_search(
             encodings= encodings,
             encoding_lengths= token_lengths,
+            conditions= speech_prompts,
             features= mels,
             feature_lengths= latent_lengths
             )
@@ -533,7 +536,7 @@ class Variance_Predictor(torch.nn.Module):
 
             # Attention + Dropout + Residual + LayerNorm
             x = attention(
-                queries= x * masks,
+                queries= x,
                 keys= speech_prompts,
                 values= speech_prompts
                 )

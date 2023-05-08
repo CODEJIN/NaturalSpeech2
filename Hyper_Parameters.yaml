@@ -17,6 +17,9 @@ Encoder:
             Kernel_Size: 9
             Dropout_Rate: 0.2
 
+Monotonic_Alignment_Search:
+    Condition_Attention_Head: 8
+
 Speech_Prompter:
     Size: 512
     Transformer:
