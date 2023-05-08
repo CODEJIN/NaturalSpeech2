@@ -268,7 +268,7 @@ class FFT_Block(torch.nn.Module):
         '''
         masks = Mask_Generate(lengths= lengths, max_length= torch.ones_like(x[0, 0]).sum())   # [Batch, Time]
 
-        # Attention + Dropout + Residual + LayerNorm
+        # Attention + Dropout + Residual + Norm
         x = self.attention(
             queries= x,
             keys= x,
@@ -276,7 +276,7 @@ class FFT_Block(torch.nn.Module):
             key_padding_masks= masks
             )
         
-        # FFN + Dropout + LayerNorm
+        # FFN + Dropout + Norm
         float_masks = (~masks).unsqueeze(1).float()   # float mask
         x = self.ffn(x, float_masks)
 
@@ -511,10 +511,6 @@ class Variance_Predictor(torch.nn.Module):
                 )
             for index in range(stack)
             ])
-        
-        
-        self.temp_norm = LayerNorm(channels)
-
         self.projection = Conv1d(
             in_channels= channels,
             out_channels= 1,
@@ -540,7 +536,7 @@ class Variance_Predictor(torch.nn.Module):
             for conv_block in conv_blocks:
                 x = conv_block(x * masks) + x
 
-            # Attention + Dropout + Residual + LayerNorm
+            # Attention + Dropout + Residual + Norm
             x = attention(
                 queries= x,
                 keys= speech_prompts,

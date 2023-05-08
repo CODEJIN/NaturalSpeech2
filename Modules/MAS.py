@@ -6,7 +6,7 @@ from numba import jit
 from typing import Optional, List, Dict, Tuple, Union
 
 from .LinearAttention import LinearAttention
-from .Layer import Conv1d, Linear, Lambda, Residual, LayerNorm
+from .Layer import Conv1d
 
 class Monotonic_Alignment_Search(torch.nn.Module): 
     def __init__(

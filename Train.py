@@ -272,6 +272,8 @@ class Trainer:
 
         self.steps += 1
         self.tqdm.update(1)
+        
+        self.scheduler.step()
 
         for tag, loss in loss_dict.items():
             loss = reduce_tensor(loss.data, self.num_gpus).item() if self.num_gpus > 1 else loss.item()
@@ -321,7 +323,6 @@ class Trainer:
             if self.steps >= self.hp.Train.Max_Step:
                 return
 
-        self.scheduler.step()
 
     def Evaluation_Step(self, tokens, token_lengths, speech_prompts, speech_prompts_for_diffusion, latents, latent_lengths, f0s, mels, attention_priors):
         loss_dict = {}
@@ -432,7 +433,7 @@ class Trainer:
 
             target_audio = target_audios[0, :target_audio_length].clamp(-1.0, 1.0)
             prediction_audio = prediction_audios[0, :prediction_audio_length].clamp(-1.0, 1.0)
-
+            
             target_feature = mel_spectrogram(
                 target_audio.unsqueeze(0),
                 n_fft= self.hp.Sound.Frame_Shift * 4,
@@ -442,17 +443,22 @@ class Trainer:
                 win_size= self.hp.Sound.Frame_Shift * 4,
                 fmin= 0,
                 fmax= None
-                ).squeeze(0).cpu().numpy()            
-            prediction_feature = mel_spectrogram(
-                prediction_audio.unsqueeze(0),
-                n_fft= self.hp.Sound.Frame_Shift * 4,
-                num_mels= self.hp.Sound.Mel_Dim,
-                sampling_rate= self.hp.Sound.Sample_Rate,
-                hop_size= self.hp.Sound.Frame_Shift,
-                win_size= self.hp.Sound.Frame_Shift * 4,
-                fmin= 0,
-                fmax= None
                 ).squeeze(0).cpu().numpy()
+
+            if prediction_audio_length > self.hp.Sound.Frame_Shift * 10:
+                prediction_feature = mel_spectrogram(
+                    prediction_audio.unsqueeze(0),
+                    n_fft= self.hp.Sound.Frame_Shift * 4,
+                    num_mels= self.hp.Sound.Mel_Dim,
+                    sampling_rate= self.hp.Sound.Sample_Rate,
+                    hop_size= self.hp.Sound.Frame_Shift,
+                    win_size= self.hp.Sound.Frame_Shift * 4,
+                    fmin= 0,
+                    fmax= None
+                    ).squeeze(0).cpu().numpy()
+            else:
+                logging.warning('Prediction feature could not be generated because too shoart audio length.')
+                prediction_feature = np.zeros(shape= (self.hp.Sound.Mel_Dim, 1), dtype= np.float32)
 
             target_audio = target_audio.cpu().numpy()
             prediction_audio = prediction_audio.cpu().numpy()
@@ -676,8 +682,8 @@ class Trainer:
             os.makedirs(self.hp.Checkpoint_Path, exist_ok= True)
             copyfile(self.hp_path, hp_path)
 
-        # if self.steps == 0:
-        #     self.Evaluation_Epoch()
+        if self.steps == 0:
+            self.Evaluation_Epoch()
 
         if self.hp.Train.Initial_Inference:
             self.Inference_Epoch()

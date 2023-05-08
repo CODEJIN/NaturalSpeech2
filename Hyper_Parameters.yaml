@@ -123,8 +123,8 @@ Train:
     Logging_Interval: 1
     Evaluation_Interval: 1000
     Inference_Interval: 5000
-    # Initial_Inference: true
-    Initial_Inference: false
+    Initial_Inference: true
+    # Initial_Inference: false
     Inference_in_Train:
         Text: [
             'Do not kill the goose that lays the golden eggs.',
@@ -147,8 +147,8 @@ Checkpoint_Path: './results/Checkpoint'
 Log_Path: './results/Log'
 
 Weights_and_Biases:
-    # Use: true
-    Use: false
+    Use: true
+    # Use: false
     Project: 'NaturalSpeech2'
     Entity: 'codejin'
     Name: 'LJ'
@@ -156,7 +156,7 @@ Weights_and_Biases:
         Use: false
         Interval: 50000 # Unlike local, The capacity of WandB is small.
 
-Use_Mixed_Precision: false   # Don't use mixed precision in this model.
+Use_Mixed_Precision: true   # Don't use mixed precision in this model.
 Use_Multi_GPU: false
 Device: '0'
 # Use_Multi_GPU: true
