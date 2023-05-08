@@ -139,13 +139,12 @@ class Residual(torch.nn.Module):
         return self.module(*args, **kwargs)
 
 class LayerNorm(torch.nn.Module):
-    def __init__(self, num_features: int, eps: float= 1e-5):
+    def __init__(self, num_features: int, eps: float= 1e-4):
         super().__init__()
         
         self.eps = eps
         self.gamma = torch.nn.Parameter(torch.ones(num_features))
         self.beta = torch.nn.Parameter(torch.zeros(num_features))
-
 
     def forward(self, inputs: torch.Tensor):
         means = inputs.mean(dim= 1, keepdim= True)

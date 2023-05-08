@@ -15,6 +15,7 @@ from Modules.Modules import NaturalSpeech2, Mask_Generate
 from Modules.MAS import MAS_MLE_Loss
 
 from Datasets import Dataset, Inference_Dataset, Collater, Inference_Collater
+from Noam_Scheduler import Noam_Scheduler
 from Logger import Logger
 
 from meldataset import mel_spectrogram
@@ -184,11 +185,11 @@ class Trainer:
             betas= (self.hp.Train.ADAM.Beta1, self.hp.Train.ADAM.Beta2),
             eps= self.hp.Train.ADAM.Epsilon
             )
-        self.scheduler = torch.optim.lr_scheduler.ExponentialLR(
+        self.scheduler = Noam_Scheduler(
             optimizer= self.optimizer,
-            gamma= self.hp.Train.Learning_Rate.Decay,
-            last_epoch= -1
+            warmup_steps= self.hp.Train.Learning_Rate.Warmup_Step
             )
+        
 
         self.scaler = torch.cuda.amp.GradScaler(enabled= self.hp.Use_Mixed_Precision)
 
@@ -675,8 +676,8 @@ class Trainer:
             os.makedirs(self.hp.Checkpoint_Path, exist_ok= True)
             copyfile(self.hp_path, hp_path)
 
-        if self.steps == 0:
-            self.Evaluation_Epoch()
+        # if self.steps == 0:
+        #     self.Evaluation_Epoch()
 
         if self.hp.Train.Initial_Inference:
             self.Inference_Epoch()

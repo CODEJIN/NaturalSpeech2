@@ -54,13 +54,20 @@ F0_Predictor:
 Diffusion:
     Max_Step: 1000
     Size: 512
-    Kernel_Size: 5
-    Stack: 40
-    Attention:
+    Pre_Attention:
         Query_Token: 32
         Query_Size: 512
         Head: 8
         Dropout_Rate: 0.0
+    WaveNet:
+        Kernel_Size: 3
+        Dilation: 2
+        Stack: 40
+        Dropout_Rate: 0.2    
+        Attention:
+            Apply_in_Stack: 3
+            Head: 8
+            Dropout_Rate: 0.0
 
 Audio_Codec:
     Size: 128
@@ -100,8 +107,8 @@ Train:
     Batch_Size: 16
     Segment_Size: 64
     Learning_Rate:
-        Initial: 1.0e-4
-        Decay: 0.999875
+        Initial: 5.0e-4
+        Warmup_Step: 32000
         Lambda:
             Diffusion: 45.0
             Duration: 45.0
@@ -149,7 +156,7 @@ Weights_and_Biases:
         Use: false
         Interval: 50000 # Unlike local, The capacity of WandB is small.
 
-Use_Mixed_Precision: false  # Don't use mixed precision in this model.
+Use_Mixed_Precision: false   # Don't use mixed precision in this model.
 Use_Multi_GPU: false
 Device: '0'
 # Use_Multi_GPU: true

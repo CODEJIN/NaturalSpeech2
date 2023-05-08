@@ -52,9 +52,6 @@ class LinearAttention(torch.nn.Module):
             w_init_gain= 'linear'
             )
         self.dropout = torch.nn.Dropout(p= dropout_rate)
-        
-        if use_scale:
-            self.scale = torch.nn.Parameter(torch.zeros(1))
 
         if use_norm:
             self.norm = LayerNorm(num_features= query_channels)
@@ -93,9 +90,6 @@ class LinearAttention(torch.nn.Module):
         contexts = contexts.permute(0, 1, 3, 2) @ queries   # [Batch, Head, Calc_d // Head, Enc_t]
         contexts = contexts.view(contexts.size(0), contexts.size(1) * contexts.size(2), contexts.size(3))   # [Batch, Calc_d, Enc_t]
         contexts = self.projection(contexts)    # [Batch, Enc_d, Enc_t]
-
-        if self.use_scale:
-            contexts = self.scale * contexts
 
         contexts = self.dropout(contexts)
 

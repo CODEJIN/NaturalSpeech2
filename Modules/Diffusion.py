@@ -5,7 +5,7 @@ from typing import Optional, List, Dict, Union
 from tqdm import tqdm
 
 from .LinearAttention import LinearAttention
-from .Layer import Conv1d, Lambda, LayerNorm
+from .Layer import Conv1d, Lambda
 
 class Diffusion(torch.nn.Module):
     def __init__(
@@ -307,57 +307,48 @@ class Denoiser(torch.nn.Module):
                 w_init_gain= 'linear'
                 )
             )
-
-        self.residual_blocks = torch.nn.ModuleList([
-            Residual_Block(
-                channels= self.hp.Diffusion.Size,
-                kernel_size= 3,
-                condition_channels= self.hp.Diffusion.Size
-                )
-            for _ in range(self.hp.Diffusion.Stack)
-            ])
         
         self.pre_attention = LinearAttention(
-            query_channels= self.hp.Diffusion.Attention.Query_Size,
+            query_channels= self.hp.Diffusion.Pre_Attention.Query_Size,
             key_channels= self.hp.Speech_Prompter.Size, 
             value_channels= self.hp.Speech_Prompter.Size,
-            calc_channels= self.hp.Diffusion.Attention.Query_Size,
-            num_heads= self.hp.Diffusion.Attention.Head,
-            dropout_rate= self.hp.Diffusion.Attention.Dropout_Rate
+            calc_channels= self.hp.Diffusion.Pre_Attention.Query_Size,
+            num_heads= self.hp.Diffusion.Pre_Attention.Head,
+            dropout_rate= self.hp.Diffusion.Pre_Attention.Dropout_Rate
             )
 
         self.pre_attention_query = torch.nn.Parameter(
-            torch.empty(1, self.hp.Diffusion.Attention.Query_Size, self.hp.Diffusion.Attention.Query_Token)
+            torch.empty(1, self.hp.Diffusion.Pre_Attention.Query_Size, self.hp.Diffusion.Pre_Attention.Query_Token)
             )
-        query_variance = math.sqrt(3.0) * math.sqrt(2.0 / (self.hp.Diffusion.Attention.Query_Size + self.hp.Diffusion.Attention.Query_Token))
+        query_variance = math.sqrt(3.0) * math.sqrt(2.0 / (self.hp.Diffusion.Pre_Attention.Query_Size + self.hp.Diffusion.Pre_Attention.Query_Token))
         self.pre_attention_query.data.uniform_(-query_variance, query_variance)
         
-        self.attentions = torch.nn.ModuleList([
-            LinearAttention(
-                query_channels= self.hp.Diffusion.Size,
-                key_channels= self.hp.Speech_Prompter.Size, 
-                value_channels= self.hp.Speech_Prompter.Size,
-                calc_channels= self.hp.Diffusion.Size,
-                num_heads= self.hp.Diffusion.Attention.Head,
-                dropout_rate= self.hp.Diffusion.Attention.Dropout_Rate
+        
+        self.wavenets = torch.nn.ModuleList([
+            WaveNet(
+                channels= self.hp.Diffusion.Size,
+                kernel_size= self.hp.Diffusion.WaveNet.Kernel_Size,
+                dilation= self.hp.Diffusion.WaveNet.Dilation,
+                condition_channels= self.hp.Diffusion.Size,
+                diffusion_step_channels= self.hp.Diffusion.Size,
+                wavenet_dropout_rate= self.hp.Diffusion.WaveNet.Dropout_Rate,
+                apply_film= (wavenet_index + 1) % self.hp.Diffusion.WaveNet.Attention.Apply_in_Stack == 0,
+                speech_prompt_channels= self.hp.Speech_Prompter.Size,
+                speech_prompt_attention_head= self.hp.Diffusion.WaveNet.Attention.Head,
+                speech_prompt_attention_dropout_rate= self.hp.Diffusion.WaveNet.Attention.Dropout_Rate,
                 )
-            for _ in range(self.hp.Diffusion.Stack)
+            for wavenet_index in range(self.hp.Diffusion.WaveNet.Stack)
             ])
 
-        self.films = torch.nn.ModuleList([
-            FilM(
-                channels= self.hp.Diffusion.Size,
-                condition_channels= self.hp.Diffusion.Size,
+        self.postnet = torch.nn.Sequential(
+            torch.nn.ReLU(),
+            Conv1d(
+                in_channels= self.hp.Diffusion.Size,
+                out_channels= self.hp.Audio_Codec.Size,
+                kernel_size= 1,
+                w_init_gain= 'zero'
                 )
-            for _ in range(self.hp.Diffusion.Stack)
-            ])
-        
-        self.postnet = Conv1d(
-            in_channels= self.hp.Diffusion.Size,
-            out_channels= self.hp.Audio_Codec.Size,
-            kernel_size= 1,
-            w_init_gain= 'zero'
-            )
+            ) 
 
     def forward(
         self,
@@ -378,29 +369,25 @@ class Denoiser(torch.nn.Module):
         x = self.prenet(latents)  # [Batch, Diffusion_d, Audio_ct]
         encodings = self.encoding_ffn(encodings) # [Batch, Diffusion_d, Audio_ct]
         diffusion_steps = self.step_ffn(diffusion_steps) # [Batch, Diffusion_d, 1]
-
+        
         speech_prompts = self.pre_attention(
             queries= self.pre_attention_query.expand(speech_prompts.size(0), -1, -1),
             keys= speech_prompts,
             values= speech_prompts,
             )   # [Batch, Diffusion_d, Token_n]
-
+        
         skips_list = []
-        for residual_block, attention, film in zip(self.residual_blocks, self.attentions, self.films):
-            x, skips = residual_block(
+        for wavenet in self.wavenets:
+            x, skips = wavenet(
                 x= x,
+                masks= masks,                
                 conditions= encodings,
-                diffusion_steps= diffusion_steps
+                diffusion_steps= diffusion_steps,
+                speech_prompts= speech_prompts
                 )   # [Batch, Diffusion_d, Audio_ct]
-            prompt_conditions = attention(
-                queries= x,
-                keys= speech_prompts,
-                values= speech_prompts,
-                )   # [Batch, Diffusion_d, Audio_ct]
-            x = film(x, prompt_conditions, masks)   # [Batch, Diffusion_d, Audio_ct]            
             skips_list.append(skips)
 
-        x = torch.stack(skips_list, dim= 0).sum(dim= 0) / math.sqrt(self.hp.Diffusion.Stack)
+        x = torch.stack(skips_list, dim= 0).sum(dim= 0) / math.sqrt(self.hp.Diffusion.WaveNet.Stack)
         x = self.postnet(x) * masks
 
         return x
@@ -422,65 +409,93 @@ class Diffusion_Embedding(torch.nn.Module):
 
         return embeddings
 
-class Residual_Block(torch.nn.Module):
+class WaveNet(torch.nn.Module):
     def __init__(
         self,
         channels: int,
         kernel_size: int,
-        condition_channels: int
+        dilation: int,
+        condition_channels: int,
+        diffusion_step_channels: int,
+        wavenet_dropout_rate: float= 0.0,
+        apply_film: bool= False,
+        speech_prompt_channels: Optional[int]= None,
+        speech_prompt_attention_head: Optional[int]= None,
+        speech_prompt_attention_dropout_rate: float= 0.0,
         ):
         super().__init__()
-        self.in_channels = channels
-        
-        self.condition = Conv1d(
-            in_channels= condition_channels,
-            out_channels= channels * 2,
-            kernel_size= 1,
-            w_init_gain= 'linear'
-            )
-        self.diffusion_step = Conv1d(
-            in_channels= channels,
-            out_channels= channels,
-            kernel_size= 1,
-            w_init_gain= 'linear'
-            )
+        self.calc_channels = channels
+        self.apply_film = apply_film
 
-        self.conv = Conv1d(
+        def weight_norm_initialize_weight(module):
+            if 'Conv' in module.__class__.__name__:
+                module.weight.data.normal_(0.0, 0.01)        
+
+        self.conv = torch.nn.utils.weight_norm(Conv1d(
             in_channels= channels,
             out_channels= channels * 2,
             kernel_size= kernel_size,
-            padding= kernel_size // 2,
-            w_init_gain= 'gate'
-            )
+            dilation= dilation,
+            padding= (kernel_size - 1) * dilation // 2
+            ))
+        
+        self.dropout = torch.nn.Dropout(p= wavenet_dropout_rate)
 
-        self.projection = Conv1d(
-            in_channels= channels,
+        self.condition = torch.nn.utils.weight_norm(Conv1d(
+            in_channels= condition_channels,
             out_channels= channels * 2,
-            kernel_size= 1,
-            w_init_gain= 'tanh'
-            )
-        self.norm = LayerNorm(num_features= channels)
+            kernel_size= 1
+            ))
+        self.diffusion_step = torch.nn.utils.weight_norm(Conv1d(
+            in_channels= diffusion_step_channels,
+            out_channels= channels,
+            kernel_size= 1
+            ))
+        
+        self.conv.apply(weight_norm_initialize_weight)
+        self.condition.apply(weight_norm_initialize_weight)
+        self.diffusion_step.apply(weight_norm_initialize_weight)
+
+        if apply_film:
+            self.attention = LinearAttention(
+                query_channels= channels,
+                key_channels= speech_prompt_channels, 
+                value_channels= speech_prompt_channels,
+                calc_channels= channels,
+                num_heads= speech_prompt_attention_head,
+                dropout_rate= speech_prompt_attention_dropout_rate
+                )
+            self.film = FilM(
+                channels= channels * 2,
+                condition_channels= channels,
+                )
+
 
     def forward(
         self,
-        x: torch.Tensor,
-        conditions: torch.Tensor,
-        diffusion_steps: torch.Tensor
+        x: torch.FloatTensor,
+        masks: torch.FloatTensor,
+        conditions: torch.FloatTensor,
+        diffusion_steps: torch.FloatTensor,
+        speech_prompts: Optional[torch.FloatTensor]
         ):
         residuals = x
+        queries = x = x + self.diffusion_step(diffusion_steps)  # [Batch, Calc_d, Time]
+        
+        x = self.conv(x) + self.condition(conditions)   # [Batch, Calc_d * 2, Time]
 
-        conditions = self.condition(conditions)
-        diffusion_steps = self.diffusion_step(diffusion_steps)
+        if self.apply_film:
+            prompt_conditions = self.attention(
+                queries= queries,
+                keys= speech_prompts,
+                values= speech_prompts,
+                )   # [Batch, Diffusion_d, Time]
+            x = self.film(x, prompt_conditions, masks)
 
-        x = self.conv(x + diffusion_steps) + conditions
-        x = Fused_Gate(x)
+        x = Fused_Gate(x) # [Batch, Calc_d, Time]
+        x = self.dropout(x) * masks # [Batch, Calc_d, Time]
 
-        x = self.projection(x)
-        x, skips = x.chunk(chunks= 2, dim= 1)
-        x = self.norm(x + residuals)
-
-        return x, skips
-
+        return x + residuals, x
 
 @torch.jit.script
 def Fused_Gate(x):

@@ -484,19 +484,21 @@ class Variance_Predictor(torch.nn.Module):
         
         self.conv_blocks = torch.nn.ModuleList()
         for index in range(stack):
-            conv_block = torch.nn.Sequential()
+            conv_block = torch.nn.ModuleList()
             for conv_block_index in range(conv_stack_in_stack):
-                conv_block.append(Conv1d(
+                conv = torch.nn.Sequential()
+                conv.append(Conv1d(
                     in_channels= channels,
                     out_channels= channels,
                     kernel_size= conv_kernel_size,
                     padding= (conv_kernel_size - 1) // 2,
                     w_init_gain= 'relu'
                     ))
-                conv_block.append(LayerNorm(num_features= channels))
-                conv_block.append(torch.nn.ReLU())
-                conv_block.append(torch.nn.Dropout(p= conv_dropout_rate))
-                self.conv_blocks.append(conv_block)
+                conv.append(LayerNorm(num_features= channels))
+                conv.append(torch.nn.ReLU())
+                conv.append(torch.nn.Dropout(p= conv_dropout_rate))
+                conv_block.append(conv)
+            self.conv_blocks.append(conv_block)
 
         self.attentions = torch.nn.ModuleList([
             LinearAttention(
@@ -510,6 +512,9 @@ class Variance_Predictor(torch.nn.Module):
             for index in range(stack)
             ])
         
+        
+        self.temp_norm = LayerNorm(channels)
+
         self.projection = Conv1d(
             in_channels= channels,
             out_channels= 1,
@@ -532,7 +537,8 @@ class Variance_Predictor(torch.nn.Module):
         x = encodings
 
         for conv_blocks, attention in zip(self.conv_blocks, self.attentions):
-            x = conv_blocks(x * masks) + x
+            for conv_block in conv_blocks:
+                x = conv_block(x * masks) + x
 
             # Attention + Dropout + Residual + LayerNorm
             x = attention(
