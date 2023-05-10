@@ -15,3 +15,7 @@
 
 temp.py
 *.pickle
+Train_ALF_stochastic.py
+Modules/Modules_ALF_stochastic.py
+Modules/Stochastic_Duration_Predictor_Transforms.py
+Modules/Stochastic_Duration_Predictor.py
