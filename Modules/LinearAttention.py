@@ -1,7 +1,8 @@
 import torch
 from typing import Optional
+from einops import rearrange, einsum
 
-from .Layer import Conv1d, LayerNorm
+from .Layer import Conv1d, LayerNorm, Lambda
 
 class LinearAttention(torch.nn.Module):
     def __init__(
@@ -14,7 +15,7 @@ class LinearAttention(torch.nn.Module):
         dropout_rate: float= 0.0,
         use_scale: bool= True,
         use_residual: bool= True,
-        use_norm: bool= True
+        use_norm: bool= False
         ):
         super().__init__()
         assert calc_channels % num_heads == 0
@@ -32,7 +33,10 @@ class LinearAttention(torch.nn.Module):
                 kernel_size= 1,
                 w_init_gain= 'linear'
                 ),
-            LayerNorm(num_features= calc_channels),
+            Lambda(lambda x: torch.nn.functional.softplus(x))
+            # torch.nn.ELU(),
+            # Lambda(lambda x: x + 1.0)
+            # LayerNorm(num_features= calc_channels),
             )
         self.key = torch.nn.Sequential(
             Conv1d(
@@ -41,7 +45,10 @@ class LinearAttention(torch.nn.Module):
                 kernel_size= 1,
                 w_init_gain= 'linear'
                 ),
-            LayerNorm(num_features= calc_channels),
+            Lambda(lambda x: torch.nn.functional.softplus(x))
+            # torch.nn.ELU(),
+            # Lambda(lambda x: x + 1.0)
+            # LayerNorm(num_features= calc_channels),
             )
         self.value = torch.nn.Sequential(
             Conv1d(
@@ -50,7 +57,10 @@ class LinearAttention(torch.nn.Module):
                 kernel_size= 1,
                 w_init_gain= 'linear'
                 ),
-            LayerNorm(num_features= calc_channels),
+            Lambda(lambda x: torch.nn.functional.softplus(x))
+            # torch.nn.ELU(),
+            # Lambda(lambda x: x + 1.0)
+            # LayerNorm(num_features= calc_channels),
             )
         self.projection = Conv1d(
             in_channels= calc_channels,
@@ -59,6 +69,9 @@ class LinearAttention(torch.nn.Module):
             w_init_gain= 'linear'
             )
         self.dropout = torch.nn.Dropout(p= dropout_rate)
+
+        if use_scale:
+            self.scale = torch.nn.Parameter(torch.zeros(1))
 
         if use_norm:
             self.norm = LayerNorm(num_features= query_channels)
@@ -84,21 +97,24 @@ class LinearAttention(torch.nn.Module):
         keys = self.key(keys)
         values = self.value(values)
 
-        queries = queries.view(queries.size(0), self.num_heads, queries.size(1) // self.num_heads, queries.size(2))    # [Batch, Head, Calc_d // Head, Enc_t]
-        keys = keys.view(keys.size(0), self.num_heads, keys.size(1) // self.num_heads, keys.size(2))    # [Batch, Head, Calc_d // Head, Enc_t]
-        values = values.view(values.size(0), self.num_heads, values.size(1) // self.num_heads, values.size(2))    # [Batch, Head, Calc_d // Head, Enc_t]
+        queries = rearrange(queries, 'batch (head dimension) time -> batch head dimension time', head= self.num_heads)
+        keys = rearrange(keys, 'batch (head dimension) time -> batch head dimension time', head= self.num_heads)
+        values = rearrange(values, 'batch (head dimension) time -> batch head dimension time', head= self.num_heads)
         
         if not key_padding_masks is None:
             keys.masked_fill_(key_padding_masks[:, None, None, :], -1e+4)
+            values.masked_fill_(key_padding_masks[:, None, None, :], -1e+4)
 
         keys = (keys + 1e-3).softmax(dim= 3)
 
-        contexts = keys @ values.permute(0, 1, 3, 2)   # [Batch, Head, Calc_d // Head, Calc_d // Head]
-        contexts = contexts.permute(0, 1, 3, 2) @ queries   # [Batch, Head, Calc_d // Head, Enc_t]
-        contexts = contexts.view(contexts.size(0), contexts.size(1) * contexts.size(2), contexts.size(3))   # [Batch, Calc_d, Enc_t]
+        contexts = einsum(keys, values, 'batch head key_d time, batch head value_d time -> batch head key_d value_d')
+        contexts = einsum(queries, contexts, 'batch head query_d time, batch head query_d value_d -> batch head value_d time')
+        contexts = rearrange(contexts, 'batch head dimension time -> batch (head dimension) time')
         contexts = self.projection(contexts)    # [Batch, Enc_d, Enc_t]
-
         contexts = self.dropout(contexts)
+
+        if self.use_scale:
+            contexts = self.scale * contexts
 
         if self.use_residual:
             contexts = contexts + residuals
