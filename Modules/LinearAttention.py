@@ -24,26 +24,33 @@ class LinearAttention(torch.nn.Module):
         self.use_residual = use_residual
         self.use_norm = use_norm
 
-        self.query = Conv1d(
-            in_channels= query_channels,
-            out_channels= calc_channels,
-            kernel_size= 1,
-            bias=False,
-            w_init_gain= 'linear'
+        # Too large conv outputs make inf and nan problem.
+        self.query = torch.nn.Sequential(
+            Conv1d(
+                in_channels= query_channels,
+                out_channels= calc_channels,
+                kernel_size= 1,
+                w_init_gain= 'linear'
+                ),
+            LayerNorm(num_features= calc_channels),
             )
-        self.key = Conv1d(
-            in_channels= key_channels,
-            out_channels= calc_channels,
-            kernel_size= 1,
-            bias=False,
-            w_init_gain= 'linear'
+        self.key = torch.nn.Sequential(
+            Conv1d(
+                in_channels= key_channels,
+                out_channels= calc_channels,
+                kernel_size= 1,
+                w_init_gain= 'linear'
+                ),
+            LayerNorm(num_features= calc_channels),
             )
-        self.value = Conv1d(
-            in_channels= value_channels,
-            out_channels= calc_channels,
-            kernel_size= 1,
-            bias=False,
-            w_init_gain= 'linear'
+        self.value = torch.nn.Sequential(
+            Conv1d(
+                in_channels= value_channels,
+                out_channels= calc_channels,
+                kernel_size= 1,
+                w_init_gain= 'linear'
+                ),
+            LayerNorm(num_features= calc_channels),
             )
         self.projection = Conv1d(
             in_channels= calc_channels,
@@ -84,7 +91,7 @@ class LinearAttention(torch.nn.Module):
         if not key_padding_masks is None:
             keys.masked_fill_(key_padding_masks[:, None, None, :], -1e+4)
 
-        keys = (keys + 1e-4).softmax(dim= 3)
+        keys = (keys + 1e-3).softmax(dim= 3)
 
         contexts = keys @ values.permute(0, 1, 3, 2)   # [Batch, Head, Calc_d // Head, Calc_d // Head]
         contexts = contexts.permute(0, 1, 3, 2) @ queries   # [Batch, Head, Calc_d // Head, Enc_t]

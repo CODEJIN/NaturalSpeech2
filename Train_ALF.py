@@ -7,12 +7,12 @@ import logging, yaml, os, sys, argparse, math, pickle, wandb
 from tqdm import tqdm
 from collections import defaultdict
 import matplotlib
-matplotlib.use('agg')
+# matplotlib.use('agg')
 import matplotlib.pyplot as plt
 from scipy.io import wavfile
 
-from Modules.Modules import NaturalSpeech2, Mask_Generate
-from Modules.MAS import MAS_MLE_Loss
+from Modules.Modules_ALF import NaturalSpeech2, Mask_Generate
+from Modules.Nvidia_Alignment_Learning_Framework import AttentionBinarizationLoss, AttentionCTCLoss
 
 from Datasets import Dataset, Inference_Dataset, Collater, Inference_Collater
 from Noam_Scheduler import Noam_Scheduler
@@ -177,7 +177,8 @@ class Trainer:
         self.criterion_dict = {
             'MSE': torch.nn.MSELoss(reduction= 'none').to(self.device),
             'MAE': torch.nn.L1Loss(reduction= 'none').to(self.device),
-            'MLE': MAS_MLE_Loss
+            'Attention_Binarization': AttentionBinarizationLoss(),
+            'Attention_CTC': AttentionCTCLoss(),
             }
         self.optimizer = torch.optim.AdamW(
             params= self.model.parameters(),
@@ -189,7 +190,6 @@ class Trainer:
             optimizer= self.optimizer,
             warmup_steps= self.hp.Train.Learning_Rate.Warmup_Step
             )
-        
 
         self.scaler = torch.cuda.amp.GradScaler(enabled= self.hp.Use_Mixed_Precision)
 
@@ -210,7 +210,7 @@ class Trainer:
 
         with torch.cuda.amp.autocast(enabled= self.hp.Use_Mixed_Precision):
             _, noises, epsilons, duration_predictions, f0_predictions, \
-            mas_means, mas_log_stds, durations, _, _, _ = self.model(
+            attention_softs, attention_hards, attention_logprobs, durations, _, _ = self.model(
                 tokens= tokens,
                 token_lengths= token_lengths,
                 speech_prompts= speech_prompts,
@@ -240,24 +240,20 @@ class Trainer:
                     duration_predictions,
                     durations
                     ) * token_masks).sum() / token_masks.sum()
-
                 loss_dict['F0'] = (self.criterion_dict['MAE'](
                     f0_predictions.float(),
                     f0s
                     ) * latent_masks).sum() / latent_masks.sum()
-                loss_dict['MLE'] = self.criterion_dict['MLE'](
-                    features= mels,
-                    feature_lengths= latent_lengths,
-                    means= mas_means,
-                    log_stds= mas_log_stds
-                    )
+                loss_dict['Attention_Binarization'] = self.criterion_dict['Attention_Binarization'](attention_hards, attention_softs)
+                loss_dict['Attention_CTC'] = self.criterion_dict['Attention_CTC'](attention_logprobs, token_lengths, latent_lengths)
 
         self.optimizer.zero_grad()
         self.scaler.scale(
-            loss_dict['Diffusion'] * self.hp.Train.Learning_Rate.Lambda.Diffusion +
-            loss_dict['Duration'] * self.hp.Train.Learning_Rate.Lambda.Duration +
-            loss_dict['F0'] * self.hp.Train.Learning_Rate.Lambda.F0 +
-            loss_dict['MLE']
+            #loss_dict['Diffusion'] +
+            loss_dict['Duration'] +
+            loss_dict['F0'] +
+            loss_dict['Attention_Binarization'] +
+            loss_dict['Attention_CTC']
             ).backward()
 
         self.scaler.unscale_(self.optimizer)
@@ -267,7 +263,7 @@ class Trainer:
                 parameters= self.model.parameters(),
                 max_norm= self.hp.Train.Gradient_Norm
                 )
-
+        
         self.scaler.step(self.optimizer)
         self.scaler.update()
 
@@ -324,7 +320,6 @@ class Trainer:
             if self.steps >= self.hp.Train.Max_Step:
                 return
 
-
     def Evaluation_Step(self, tokens, token_lengths, speech_prompts, speech_prompts_for_diffusion, latents, latent_lengths, f0s, mels, attention_priors):
         loss_dict = {}
         tokens = tokens.to(self.device, non_blocking=True)
@@ -339,7 +334,7 @@ class Trainer:
 
         with torch.cuda.amp.autocast(enabled= self.hp.Use_Mixed_Precision):
             _, noises, epsilons, duration_predictions, f0_predictions, \
-            mas_means, mas_log_stds, durations, _, _, _ = self.model(
+            attention_softs, attention_hards, attention_logprobs, durations, _, _ = self.model(
                 tokens= tokens,
                 token_lengths= token_lengths,
                 speech_prompts= speech_prompts,
@@ -373,16 +368,14 @@ class Trainer:
                     f0_predictions.float(),
                     f0s
                     ) * latent_masks).sum() / latent_masks.sum()
-                loss_dict['MLE'] = self.criterion_dict['MLE'](
-                    features= mels,
-                    feature_lengths= latent_lengths,
-                    means= mas_means,
-                    log_stds= mas_log_stds
-                    )
+                loss_dict['Attention_Binarization'] = self.criterion_dict['Attention_Binarization'](attention_hards, attention_softs)
+                loss_dict['Attention_CTC'] = self.criterion_dict['Attention_CTC'](attention_logprobs, token_lengths, latent_lengths)
 
         for tag, loss in loss_dict.items():
             loss = reduce_tensor(loss.data, self.num_gpus).item() if self.num_gpus > 1 else loss.item()
             self.scalar_dict['Evaluation']['Loss/{}'.format(tag)] += loss
+
+        return durations
 
     def Evaluation_Epoch(self):
         logging.info('(Steps: {}) Start evaluation in GPU {}.'.format(self.steps, self.gpu_id))
@@ -394,7 +387,7 @@ class Trainer:
             desc='[Evaluation]',
             total= math.ceil(len(self.dataloader_dict['Eval'].dataset) / self.hp.Train.Batch_Size / self.num_gpus)
             ):
-            self.Evaluation_Step(
+            durations = self.Evaluation_Step(
                 tokens= tokens,
                 token_lengths= token_lengths,
                 speech_prompts= speech_prompts,
@@ -417,7 +410,7 @@ class Trainer:
             index = np.random.randint(0, tokens.size(0))
 
             with torch.inference_mode():
-                prediction_audios, *_, prediction_alignments, prediction_f0s, prediction_latent_lengths = self.model(
+                prediction_audios, *_, prediction_durations, prediction_f0s, prediction_latent_lengths = self.model(
                     tokens= tokens[index].unsqueeze(0).to(self.device),
                     token_lengths= token_lengths[index].unsqueeze(0).to(self.device),
                     speech_prompts= speech_prompts[index].unsqueeze(0).to(self.device),
@@ -434,7 +427,7 @@ class Trainer:
 
             target_audio = target_audios[0, :target_audio_length].clamp(-1.0, 1.0)
             prediction_audio = prediction_audios[0, :prediction_audio_length].clamp(-1.0, 1.0)
-            
+
             target_feature = mel_spectrogram(
                 target_audio.unsqueeze(0),
                 n_fft= self.hp.Sound.Frame_Shift * 4,
@@ -444,8 +437,7 @@ class Trainer:
                 win_size= self.hp.Sound.Frame_Shift * 4,
                 fmin= 0,
                 fmax= None
-                ).squeeze(0).cpu().numpy()
-
+                ).squeeze(0).cpu().numpy()            
             if prediction_audio_length > self.hp.Sound.Frame_Shift * 10:
                 prediction_feature = mel_spectrogram(
                     prediction_audio.unsqueeze(0),
@@ -464,15 +456,20 @@ class Trainer:
             target_audio = target_audio.cpu().numpy()
             prediction_audio = prediction_audio.cpu().numpy()
 
-            prediction_alignment = prediction_alignments[0, :token_length, :prediction_latent_length].cpu().numpy()
-
             target_f0 = f0s[index, :target_latent_length].cpu().numpy() 
             prediction_f0 = prediction_f0s[0, :prediction_latent_length].cpu().numpy()
+
+            target_duration = durations[index, :token_length].long()
+            target_duration = torch.arange(target_duration.size(0)).repeat_interleave(target_duration.cpu())[:prediction_latent_length].cpu().numpy()
+
+            prediction_duration = prediction_durations[0, :token_length]
+            prediction_duration = torch.arange(prediction_duration.size(0)).repeat_interleave(prediction_duration.cpu())[:prediction_latent_length].cpu().numpy()
 
             image_dict = {
                 'Feature/Target': (target_feature, None, 'auto', None, None, None),
                 'Feature/Prediction': (prediction_feature, None, 'auto', None, None, None),
-                'Alignment/Prediction': (prediction_alignment, None, 'auto', None, None, None),
+                'Duration/Target': (target_duration, None, 'auto', None, None, None),
+                'Duration/Prediction': (prediction_duration, None, 'auto', None, None, None),
                 'F0/Target': (target_f0, None, 'auto', None, None, None),
                 'F0/Prediction': (prediction_f0, None, 'auto', None, None, None),
                 }
@@ -504,7 +501,13 @@ class Trainer:
                             title= 'F0',
                             xname= 'Latent_t'
                             ),
-                        'Evaluation.Alignment': wandb.Image(prediction_alignment),
+                        'Evaluation.Duration': wandb.plot.line_series(
+                            xs= np.arange(prediction_latent_length),
+                            ys= [target_duration, prediction_duration],
+                            keys= ['Target', 'Prediction'],
+                            title= 'Duration',
+                            xname= 'Latent_t'
+                            ),
                         'Evaluation.Audio.Target': wandb.Audio(
                             target_audio,
                             sample_rate= self.hp.Sound.Sample_Rate,
@@ -530,7 +533,7 @@ class Trainer:
         token_lengths = token_lengths.to(self.device, non_blocking=True)
         speech_prompts = speech_prompts.to(self.device, non_blocking=True)
 
-        audio_predictions, *_, alignments, f0s, latent_lengths = self.model(
+        audio_predictions, *_, durations, f0s, latent_lengths = self.model(
             tokens= tokens,
             token_lengths= token_lengths,
             speech_prompts= speech_prompts,
@@ -544,7 +547,6 @@ class Trainer:
         
         audio_predictions = audio_predictions.cpu().numpy()
         f0s = f0s.cpu().numpy()
-        alignments = alignments.cpu().numpy()
 
         files = []
         for index in range(tokens.size(0)):
@@ -557,7 +559,7 @@ class Trainer:
         os.makedirs(os.path.join(self.hp.Inference_Path, 'Step-{}'.format(self.steps), 'WAV').replace('\\', '/'), exist_ok= True)
         for index, (
             audio,
-            alignment,
+            duration,
             f0,
             token_length,
             latent_length,
@@ -568,7 +570,7 @@ class Trainer:
             file
             ) in enumerate(zip(
             audio_predictions,
-            alignments,
+            durations.cpu().numpy(),
             f0s,
             token_lengths.cpu().numpy(),
             latent_lengths.cpu().numpy(),
@@ -585,8 +587,8 @@ class Trainer:
             plt.margins(x= 0)
             plt.title(f'Prediction  {title}')
             ax = plt.subplot2grid((4, 1), (1, 0), rowspan= 2)
-            plt.imshow(alignment[:token_length, :latent_length], aspect='auto', origin='lower')
-            plt.title('Alignment    {}'.format(title))
+            plt.plot(duration[:latent_length])
+            plt.title('Duration    {}'.format(title))
             plt.margins(x= 0)
             plt.yticks(
                 range(len(pronunciation) + 2),

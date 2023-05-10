@@ -15,9 +15,9 @@ Encoder:
         Dropout_Rate: 0.0
         FFN:
             Kernel_Size: 9
-            Dropout_Rate: 0.2
+            Dropout_Rate: 0.1
 
-Monotonic_Alignment_Search:
+Alignment_Learning_Framework:
     Condition_Attention_Head: 8
 
 Speech_Prompter:
@@ -104,7 +104,7 @@ Train:
             Min: 10
             Max: 200
     Num_Workers: 0
-    Batch_Size: 16
+    Batch_Size: 12
     Segment_Size: 64
     Learning_Rate:
         Initial: 5.0e-4
@@ -123,8 +123,8 @@ Train:
     Logging_Interval: 1
     Evaluation_Interval: 1000
     Inference_Interval: 5000
-    Initial_Inference: true
-    # Initial_Inference: false
+    # Initial_Inference: true
+    Initial_Inference: false
     Inference_in_Train:
         Text: [
             'Do not kill the goose that lays the golden eggs.',
@@ -151,7 +151,7 @@ Weights_and_Biases:
     # Use: false
     Project: 'NaturalSpeech2'
     Entity: 'codejin'
-    Name: 'LJ'
+    Name: 'LJ_ALF'
     Save_Checkpoint:
         Use: false
         Interval: 50000 # Unlike local, The capacity of WandB is small.

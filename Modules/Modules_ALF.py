@@ -4,7 +4,7 @@ import math
 from typing import Optional, Union
 from encodec import EncodecModel
 
-from .MAS import Monotonic_Alignment_Search
+from .Nvidia_Alignment_Learning_Framework import Alignment_Learning_Framework
 from .Diffusion import Diffusion
 from .LinearAttention import LinearAttention
 from .Layer import Conv1d, LayerNorm
@@ -25,11 +25,11 @@ class NaturalSpeech2(torch.nn.Module):
         self.encoder = Phoneme_Encoder(self.hp)
         self.speech_prompter = Speech_Prompter(self.hp)
 
-        self.monotonic_alignment_search = Monotonic_Alignment_Search(
-            in_channels= self.hp.Encoder.Size,
+        self.alignment_learning_framework = Alignment_Learning_Framework(
             feature_size= self.hp.Sound.Mel_Dim,
+            encoding_size= self.hp.Encoder.Size,
             condition_channels= self.hp.Speech_Prompter.Size,
-            condition_attenion_head= self.hp.Monotonic_Alignment_Search.Condition_Attention_Head
+            condition_attenion_head= self.hp.Alignment_Learning_Framework.Condition_Attention_Head
             )
 
         self.variance_block = Variacne_Block(self.hp)
@@ -99,21 +99,20 @@ class NaturalSpeech2(torch.nn.Module):
         speech_prompts = self.speech_prompter(speech_prompts)
         speech_prompts_for_diffusion = self.speech_prompter(speech_prompts_for_diffusion)
 
-        alignments, durations, mas_means, mas_log_stds = self.monotonic_alignment_search(
-            encodings= encodings,
+        durations, attention_softs, attention_hards, attention_logprobs = self.alignment_learning_framework(
+            token_embeddings= self.encoder.token_embedding(tokens).permute(0, 2, 1),
             encoding_lengths= token_lengths,
             conditions= speech_prompts,
             features= mels,
-            feature_lengths= latent_lengths
+            feature_lengths= latent_lengths,
+            attention_priors= attention_priors
             )
 
-        encodings_expand, mas_means, mas_log_stds, duration_predictions, f0_predictions, _, _, _ = self.variance_block(
+        encodings_expand, duration_predictions, f0_predictions, _, _, _ = self.variance_block(
             encodings= encodings,
             encoding_lengths= token_lengths,
             speech_prompts= speech_prompts,
-            mas_means= mas_means,
-            mas_log_stds= mas_log_stds,
-            alignments= alignments,
+            durations= durations,
             f0s= f0s,
             latent_lengths= latent_lengths
             )
@@ -141,7 +140,7 @@ class NaturalSpeech2(torch.nn.Module):
 
         return \
             None, noises, epsilons, duration_predictions, f0_predictions, \
-            mas_means, mas_log_stds, durations, None, None, None
+            attention_softs, attention_hards, attention_logprobs, durations, None, None
 
     def Inference(
         self,
@@ -156,7 +155,7 @@ class NaturalSpeech2(torch.nn.Module):
             )
         speech_prompts = self.speech_prompter(speech_prompts)
 
-        encodings_expand, *_, alignments, f0s, latent_lengths = self.variance_block(
+        encodings_expand, _, _, durations, f0s, latent_lengths = self.variance_block(
             encodings= encodings,
             encoding_lengths= token_lengths,
             speech_prompts= speech_prompts,
@@ -189,7 +188,7 @@ class NaturalSpeech2(torch.nn.Module):
 
         return \
             predictions, None, None, None, None, \
-            None, None, None, None, alignments, f0s, latent_lengths
+            None, None, None, durations, f0s, latent_lengths
 
 class Phoneme_Encoder(torch.nn.Module): 
     def __init__(
@@ -226,7 +225,7 @@ class Phoneme_Encoder(torch.nn.Module):
         tokens: [Batch, Time]
         '''
         encodings = self.token_embedding(tokens).permute(0, 2, 1)
-        
+
         for block in self.blocks:
             encodings = block(encodings, lengths)
         
@@ -408,9 +407,7 @@ class Variacne_Block(torch.nn.Module):
         encodings: torch.FloatTensor,
         encoding_lengths: torch.LongTensor,
         speech_prompts: torch.FloatTensor,
-        mas_means: Optional[torch.FloatTensor]= None,
-        mas_log_stds: Optional[torch.FloatTensor]= None,
-        alignments: Optional[torch.FloatTensor]= None,
+        durations: Optional[torch.LongTensor]= None,
         f0s: Optional[torch.FloatTensor]= None,
         latent_lengths: Optional[torch.LongTensor]= None,
         ):
@@ -419,8 +416,8 @@ class Variacne_Block(torch.nn.Module):
             lengths= encoding_lengths,
             speech_prompts= speech_prompts
             )   # [Batch, Enc_t]
-        
-        if alignments is None:
+                
+        if durations is None:
             durations = duration_predictions.ceil().long() # [Batch, Enc_t]
             latent_lengths = torch.stack([
                 duration[:length - 1].sum() + 1
@@ -432,14 +429,8 @@ class Variacne_Block(torch.nn.Module):
                 duration[length - 1:] = 0
                 duration[length - 1] = max_duration_sum - duration.sum()
 
-            alignments = self.Length_Regulate(durations= durations)
-
-        encodings = encodings @ alignments # [Batch, Enc_d, Latent_t]
-
-        if not mas_means is None:
-            mas_means = mas_means @ alignments
-        if not mas_log_stds is None:
-            mas_log_stds = mas_log_stds @ alignments
+        alignments = self.Length_Regulate(durations= durations)
+        encodings = encodings @ alignments  # [Batch, Enc_d, Latent_t]
 
         f0_predictions = self.f0_predictor(
             encodings= encodings,
@@ -452,7 +443,7 @@ class Variacne_Block(torch.nn.Module):
 
         encodings = encodings + self.f0_embedding(f0s.unsqueeze(1))  # [Batch, Enc_d, Latent_t]
 
-        return encodings, mas_means, mas_log_stds, duration_predictions, f0_predictions, alignments, f0s, latent_lengths
+        return encodings, duration_predictions, f0_predictions, durations, f0s, latent_lengths
     
     def Length_Regulate(
         self,
@@ -511,6 +502,7 @@ class Variance_Predictor(torch.nn.Module):
                 )
             for index in range(stack)
             ])
+
         self.projection = Conv1d(
             in_channels= channels,
             out_channels= 1,
@@ -523,7 +515,8 @@ class Variance_Predictor(torch.nn.Module):
         self,
         encodings: torch.Tensor,
         lengths: torch.Tensor,
-        speech_prompts: torch.Tensor
+        speech_prompts: torch.Tensor,
+        test= False
         ) -> torch.Tensor:
         '''
         encodings: [Batch, Enc_d, Enc_t or Feature_t]
@@ -533,7 +526,7 @@ class Variance_Predictor(torch.nn.Module):
         x = encodings
 
         for conv_blocks, attention in zip(self.conv_blocks, self.attentions):
-            for conv_block in conv_blocks:
+            for index, conv_block in enumerate(conv_blocks):
                 x = conv_block(x * masks) + x
 
             # Attention + Dropout + Residual + Norm
@@ -544,6 +537,7 @@ class Variance_Predictor(torch.nn.Module):
                 )
 
         x = self.projection(x * masks) * masks
+        if test: print(x.min(), x.max())
 
         return x.squeeze(1)
 
@@ -576,9 +570,9 @@ class Duration_Predictor(Variance_Predictor):
         durations = super().forward(
             encodings= encodings,
             lengths= lengths,
-            speech_prompts= speech_prompts
+            speech_prompts= speech_prompts,
+            test= True
             )
-
         return torch.nn.functional.softplus(durations)
         
 class F0_Predictor(Variance_Predictor):

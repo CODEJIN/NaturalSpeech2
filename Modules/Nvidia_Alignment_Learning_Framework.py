@@ -39,6 +39,8 @@ import functools
 from scipy import ndimage
 from scipy.stats import betabinom
 
+from .LinearAttention import LinearAttention
+
 class ConvNorm(torch.nn.Module):
     def __init__(self, in_channels, out_channels, kernel_size=1, stride=1,
                  padding=None, dilation=1, bias=True, w_init_gain='linear'):
@@ -186,7 +188,7 @@ class ConvAttention(torch.nn.Module):
         query_encoded = query_encoded.permute(1, 2, 0)
         return query_encoded
 
-    def forward(self, queries, keys, query_lens, mask=None, key_lens=None,
+    def forward(self, queries, keys, query_lens= None, mask=None, key_lens=None,
                 keys_encoded=None, attn_prior=None):
         """Attention mechanism for flowtron parallel
         Unlike in Flowtron, we have no restrictions such as causality etc,
@@ -407,9 +409,19 @@ class Alignment_Learning_Framework(torch.nn.Module):
     def __init__(
         self,
         feature_size: int,
-        encoding_size: int
+        encoding_size: int,
+        condition_channels: int,
+        condition_attenion_head: int
         ):
         super().__init__()
+
+        self.prompt_attention = LinearAttention(
+            query_channels= encoding_size,
+            key_channels= condition_channels, 
+            value_channels= condition_channels,
+            calc_channels= encoding_size,
+            num_heads= condition_attenion_head
+            )
 
         self.attention = ConvAttention(
             feature_size,
@@ -422,24 +434,28 @@ class Alignment_Learning_Framework(torch.nn.Module):
     def forward(
         self,
         token_embeddings: torch.Tensor,
-        encodings: torch.Tensor,
         encoding_lengths: torch.Tensor,
+        conditions: torch.Tensor,
         features: torch.Tensor,
         feature_lengths: torch.Tensor,
         attention_priors: torch.Tensor
         ):
+        token_embeddings = self.prompt_attention(
+            queries= token_embeddings,
+            keys= conditions,
+            values= conditions
+            )
+
         attention_masks = mask_from_lens(encoding_lengths, max_len=encoding_lengths.max())
         attention_masks = attention_masks[..., None] == 0
         
         attention_softs, attention_logprobs = self.attention(
             queries= features,
             keys= token_embeddings,
-            query_lens= feature_lengths,
             mask= attention_masks,
-            key_lens=encoding_lengths,
-            keys_encoded= encodings,
             attn_prior= attention_priors
             )
+
         attention_hards = binarize_attention(attention_softs, encoding_lengths, feature_lengths)
 
         durations = attention_hards.sum(2)[:, 0, :]
