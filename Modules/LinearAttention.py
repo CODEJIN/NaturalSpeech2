@@ -33,10 +33,10 @@ class LinearAttention(torch.nn.Module):
                 kernel_size= 1,
                 w_init_gain= 'linear'
                 ),
-            Lambda(lambda x: torch.nn.functional.softplus(x))
             # torch.nn.ELU(),
             # Lambda(lambda x: x + 1.0)
-            # LayerNorm(num_features= calc_channels),
+            LayerNorm(num_features= calc_channels),
+            Lambda(lambda x: torch.nn.functional.softplus(x))            
             )
         self.key = torch.nn.Sequential(
             Conv1d(
@@ -45,10 +45,10 @@ class LinearAttention(torch.nn.Module):
                 kernel_size= 1,
                 w_init_gain= 'linear'
                 ),
-            Lambda(lambda x: torch.nn.functional.softplus(x))
             # torch.nn.ELU(),
             # Lambda(lambda x: x + 1.0)
-            # LayerNorm(num_features= calc_channels),
+            LayerNorm(num_features= calc_channels),
+            Lambda(lambda x: torch.nn.functional.softplus(x))
             )
         self.value = torch.nn.Sequential(
             Conv1d(
@@ -57,10 +57,10 @@ class LinearAttention(torch.nn.Module):
                 kernel_size= 1,
                 w_init_gain= 'linear'
                 ),
-            Lambda(lambda x: torch.nn.functional.softplus(x))
             # torch.nn.ELU(),
             # Lambda(lambda x: x + 1.0)
-            # LayerNorm(num_features= calc_channels),
+            LayerNorm(num_features= calc_channels),
+            Lambda(lambda x: torch.nn.functional.softplus(x))
             )
         self.projection = Conv1d(
             in_channels= calc_channels,
@@ -106,7 +106,7 @@ class LinearAttention(torch.nn.Module):
             values.masked_fill_(key_padding_masks[:, None, None, :], -1e+4)
 
         keys = (keys + 1e-3).softmax(dim= 3)
-
+        
         contexts = einsum(keys, values, 'batch head key_d time, batch head value_d time -> batch head key_d value_d')
         contexts = einsum(queries, contexts, 'batch head query_d time, batch head query_d value_d -> batch head value_d time')
         contexts = rearrange(contexts, 'batch head dimension time -> batch (head dimension) time')
@@ -121,5 +121,6 @@ class LinearAttention(torch.nn.Module):
 
         if self.use_norm:
             contexts = self.norm(contexts)
+
 
         return contexts

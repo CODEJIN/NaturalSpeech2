@@ -123,8 +123,8 @@ Train:
     Logging_Interval: 1
     Evaluation_Interval: 1000
     Inference_Interval: 5000
-    # Initial_Inference: true
-    Initial_Inference: false
+    Initial_Inference: true
+    # Initial_Inference: false
     Inference_in_Train:
         Text: [
             'Do not kill the goose that lays the golden eggs.',

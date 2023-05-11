@@ -369,11 +369,11 @@ class Denoiser(torch.nn.Module):
         x = self.prenet(latents)  # [Batch, Diffusion_d, Audio_ct]
         encodings = self.encoding_ffn(encodings) # [Batch, Diffusion_d, Audio_ct]
         diffusion_steps = self.step_ffn(diffusion_steps) # [Batch, Diffusion_d, 1]
-        
+
         speech_prompts = self.pre_attention(
             queries= self.pre_attention_query.expand(speech_prompts.size(0), -1, -1),
             keys= speech_prompts,
-            values= speech_prompts,
+            values= speech_prompts
             )   # [Batch, Diffusion_d, Token_n]
         
         skips_list = []

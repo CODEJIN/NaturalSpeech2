@@ -260,7 +260,7 @@ class FFT_Block(torch.nn.Module):
     def forward(
         self,
         x: torch.Tensor,
-        lengths: torch.Tensor
+        lengths: torch.Tensor,
         ) -> torch.Tensor:
         '''
         x: [Batch, Dim, Time]
@@ -274,7 +274,7 @@ class FFT_Block(torch.nn.Module):
             values= x,
             key_padding_masks= masks
             )
-        
+
         # FFN + Dropout + Norm
         float_masks = (~masks).unsqueeze(1).float()   # float mask
         x = self.ffn(x, float_masks)
@@ -297,6 +297,9 @@ class FFN(torch.nn.Module):
             w_init_gain= 'relu'
             )
         self.relu = torch.nn.ReLU()
+        self.norm_0 = LayerNorm(
+            num_features= channels * 4,
+            )
         self.dropout = torch.nn.Dropout(p= dropout_rate)
         self.conv_1 = Conv1d(
             in_channels= channels * 4,
@@ -305,7 +308,7 @@ class FFN(torch.nn.Module):
             padding= (kernel_size - 1) // 2,
             w_init_gain= 'linear'
             )
-        self.norm = LayerNorm(
+        self.norm_1 = LayerNorm(
             num_features= channels,
             )
         
@@ -321,10 +324,11 @@ class FFN(torch.nn.Module):
 
         x = self.conv_0(x * masks)
         x = self.relu(x)
+        x = self.norm_0(x)
         x = self.dropout(x)
         x = self.conv_1(x * masks)
         x = self.dropout(x)
-        x = self.norm(x + residuals)
+        x = self.norm_1(x + residuals)
 
         return x * masks
 
@@ -525,7 +529,7 @@ class Variance_Predictor(torch.nn.Module):
         x = encodings
 
         for conv_blocks, attention in zip(self.conv_blocks, self.attentions):
-            for index, conv_block in enumerate(conv_blocks):
+            for conv_block in conv_blocks:
                 x = conv_block(x * masks) + x
 
             # Attention + Dropout + Residual + Norm
