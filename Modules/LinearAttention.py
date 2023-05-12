@@ -71,7 +71,7 @@ class LinearAttention(torch.nn.Module):
         self.dropout = torch.nn.Dropout(p= dropout_rate)
 
         if use_scale:
-            self.scale = torch.nn.Parameter(torch.zeros(1))
+            self.scale = torch.nn.Parameter(torch.full(size= (1,), fill_value= 0.001))
 
         if use_norm:
             self.norm = LayerNorm(num_features= query_channels)

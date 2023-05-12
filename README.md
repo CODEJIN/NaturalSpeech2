@@ -22,7 +22,7 @@ Shen, K., Ju, Z., Tan, X., Liu, Y., Leng, Y., He, L., ... & Bian, J. (2023). Nat
 * Information on the segment length σ of the speech prompt during training was not found in the paper and was arbitrarily set.
     * The `σ` = 3, 5, and 10 seconds used in the evaluation of paper are too long to apply to both the variance predictor and diffusion during training.
     * To ensure stability in pattern usage, half the length of the shortest pattern used in each training is set as `σ` for each training.
-* The target duration is obtained through `Monotonic alginment search (MAS)`, rather than being brought in externally.
+* The target duration is obtained through `Alignment learning framework (ALF)`, rather than being brought in externally.
     * Using external modules such as Montreal Force Alignment (MFA) may have benefits in terms of training speed or stability, but I prioritized simplifying the training process.
     * A weight has been applied to correct the relatively large MLE loss used in MAS.
 * Padding is applied between tokens like `'A <P> B <P> C ....'`

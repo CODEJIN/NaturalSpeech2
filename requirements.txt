@@ -10,3 +10,4 @@ hgtk
 pysptk
 transformers
 einops
+encodec
