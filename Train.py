@@ -209,7 +209,7 @@ class Trainer:
         attention_priors = attention_priors.to(self.device, non_blocking=True)
 
         with torch.cuda.amp.autocast(enabled= self.hp.Use_Mixed_Precision):
-            _, noises, epsilons, duration_predictions, f0_predictions, \
+            _, diffusion_targets, diffusion_predictions, duration_predictions, f0_predictions, \
             attention_softs, attention_hards, attention_logprobs, durations, _, _ = self.model(
                 tokens= tokens,
                 token_lengths= token_lengths,
@@ -233,8 +233,8 @@ class Trainer:
                     ).to(latents.device)).float()
                 
                 loss_dict['Diffusion'] = self.criterion_dict['MSE'](
-                    epsilons,
-                    noises,
+                    diffusion_targets,
+                    diffusion_predictions,
                     ).mean()
                 loss_dict['Duration'] = (self.criterion_dict['MAE'](
                     duration_predictions,
@@ -333,7 +333,7 @@ class Trainer:
         attention_priors = attention_priors.to(self.device, non_blocking=True)
 
         with torch.cuda.amp.autocast(enabled= self.hp.Use_Mixed_Precision):
-            _, noises, epsilons, duration_predictions, f0_predictions, \
+            _, diffusion_targets, diffusion_predictions, duration_predictions, f0_predictions, \
             attention_softs, attention_hards, attention_logprobs, durations, _, _ = self.model(
                 tokens= tokens,
                 token_lengths= token_lengths,
@@ -357,8 +357,8 @@ class Trainer:
                     ).to(latents.device)).float()
                 
                 loss_dict['Diffusion'] = self.criterion_dict['MSE'](
-                    epsilons,
-                    noises,
+                    diffusion_targets,
+                    diffusion_predictions,
                     ).mean()
                 loss_dict['Duration'] = (self.criterion_dict['MAE'](
                     duration_predictions,

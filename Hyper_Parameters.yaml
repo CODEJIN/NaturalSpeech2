@@ -109,10 +109,6 @@ Train:
     Learning_Rate:
         Initial: 5.0e-4
         Warmup_Step: 32000
-        Lambda:
-            Diffusion: 45.0
-            Duration: 45.0
-            F0: 45.0
     ADAM:
         Beta1: 0.8
         Beta2: 0.99
@@ -151,7 +147,7 @@ Weights_and_Biases:
     # Use: false
     Project: 'NaturalSpeech2'
     Entity: 'codejin'
-    Name: 'VCTK_ALF'
+    Name: 'VCTK'
     Save_Checkpoint:
         Use: false
         Interval: 50000 # Unlike local, The capacity of WandB is small.

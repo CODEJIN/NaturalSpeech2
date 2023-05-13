@@ -1,4 +1,5 @@
 import torch
+import numpy as np
 import math
 from argparse import Namespace
 from typing import Optional, List, Dict, Union
@@ -19,27 +20,7 @@ class Diffusion(torch.nn.Module):
             hyper_parameters= self.hp
             )
 
-        self.timesteps = self.hp.Diffusion.Max_Step
-        betas = torch.linspace(1e-4, 0.06, self.timesteps)
-        alphas = 1.0 - betas
-        alphas_cumprod = torch.cumprod(alphas, axis= 0)
-        alphas_cumprod_prev = torch.cat([torch.tensor([1.0]), alphas_cumprod[:-1]])
-        
-        # calculations for diffusion q(x_t | x_{t-1}) and others
-        self.register_buffer('alphas_cumprod', alphas_cumprod)  # [Diffusion_t]
-        self.register_buffer('alphas_cumprod_prev', alphas_cumprod_prev)  # [Diffusion_t]
-        self.register_buffer('sqrt_alphas_cumprod', alphas_cumprod.sqrt())
-        self.register_buffer('sqrt_one_minus_alphas_cumprod', (1.0 - alphas_cumprod).sqrt())
-        self.register_buffer('sqrt_recip_alphas_cumprod', (1.0 / alphas_cumprod).sqrt())
-        self.register_buffer('sqrt_recipm1_alphas_cumprod', (1.0 / alphas_cumprod - 1.0).sqrt())
-
-        # calculations for posterior q(x_{t-1} | x_t, x_0)
-        posterior_variance = betas * (1.0 - alphas_cumprod_prev) / (1.0 - alphas_cumprod)
-
-        # below: log calculation clipped because the posterior variance is 0 at the beginning of the diffusion chain
-        self.register_buffer('posterior_log_variance', torch.maximum(posterior_variance, torch.tensor([1e-20])).log())
-        self.register_buffer('posterior_mean_coef1', betas * alphas_cumprod_prev.sqrt() / (1.0 - alphas_cumprod))
-        self.register_buffer('posterior_mean_coef2', (1.0 - alphas_cumprod_prev) * alphas.sqrt() / (1.0 - alphas_cumprod))
+        self.gamma_scheuler = sigmoid_schedule
 
     def forward(
         self,
@@ -53,121 +34,39 @@ class Diffusion(torch.nn.Module):
         latents: [Batch, Latent_d, Audio_ct]
         '''
         if not latents is None:    # train
-            diffusion_steps = torch.randint(
-                low= 0,
-                high= self.timesteps,
-                size= (encodings.size(0),),
-                dtype= torch.long,
-                device= encodings.device
-                )    # random single step
-            
-            noises, epsilons = self.Get_Noise_Epsilon_for_Train(
+            diffusion_targets, diffusion_predictions = self.Train(
                 latents= latents,
                 encodings= encodings,
                 lengths= lengths,
-                speech_prompts= speech_prompts,
-                diffusion_steps= diffusion_steps,
+                speech_prompts= speech_prompts
                 )
-            return None, noises, epsilons
+            return None, diffusion_targets, diffusion_predictions
         else:   # inference
-            latents = self.Sampling(
+            latents = self.DDPM(
                 encodings= encodings,
                 lengths= lengths,
                 speech_prompts= speech_prompts,
                 )
             return latents, None, None
 
-    def Sampling(
-        self,
-        encodings: torch.Tensor,
-        lengths: torch.Tensor,
-        speech_prompts: torch.FloatTensor,
-        ):
-        latents = torch.randn(
-            size= (encodings.size(0), self.hp.Audio_Codec.Size, encodings.size(2)),
-            device= encodings.device
-            )
-        for diffusion_step in reversed(range(self.timesteps)):
-            latents = self.P_Sampling(
-                latents= latents,
-                encodings= encodings,
-                lengths= lengths,
-                speech_prompts= speech_prompts,
-                diffusion_steps= torch.full(
-                    size= (encodings.size(0), ),
-                    fill_value= diffusion_step,
-                    dtype= torch.long,
-                    device= encodings.device
-                    ),
-                )
-        
-        return latents
-
-    def P_Sampling(
+    def Train(
         self,
         latents: torch.Tensor,
         encodings: torch.Tensor,
         lengths: torch.Tensor,
         speech_prompts: torch.FloatTensor,
-        diffusion_steps: torch.Tensor,
-        ):
-        posterior_means, posterior_log_variances = self.Get_Posterior(
-            latents= latents,
-            encodings= encodings,
-            lengths= lengths,
-            speech_prompts= speech_prompts,
-            diffusion_steps= diffusion_steps,
-            )
-
-        noises = torch.randn_like(latents) # [Batch, Feature_d, Feature_d]
-        masks = (diffusion_steps > 0).float().unsqueeze(1).unsqueeze(1) #[Batch, 1, 1]
-        
-        return posterior_means + masks * (0.5 * posterior_log_variances).exp() * noises
-
-    def Get_Posterior(
-        self,
-        latents: torch.Tensor,
-        encodings: torch.Tensor,
-        lengths: torch.Tensor,
-        speech_prompts: torch.FloatTensor,
-        diffusion_steps: torch.Tensor
-        ):
-        noised_predictions = self.denoiser(
-            latents= latents,
-            lengths= lengths,
-            encodings= encodings,
-            speech_prompts= speech_prompts,
-            diffusion_steps= diffusion_steps
-            )
-
-        epsilons = \
-            latents * self.sqrt_recip_alphas_cumprod[diffusion_steps][:, None, None] - \
-            noised_predictions * self.sqrt_recipm1_alphas_cumprod[diffusion_steps][:, None, None]
-        epsilons.clamp_(-1.0, 1.0)  # clipped
-        
-        posterior_means = \
-            epsilons * self.posterior_mean_coef1[diffusion_steps][:, None, None] + \
-            latents * self.posterior_mean_coef2[diffusion_steps][:, None, None]
-        posterior_log_variances = \
-            self.posterior_log_variance[diffusion_steps][:, None, None]
-
-        return posterior_means, posterior_log_variances
-
-    def Get_Noise_Epsilon_for_Train(
-        self,
-        latents: torch.Tensor,
-        encodings: torch.Tensor,
-        lengths: torch.Tensor,
-        speech_prompts: torch.FloatTensor,
-        diffusion_steps: torch.Tensor,
         ):
         noises = torch.randn_like(latents)
 
-        noised_latents = \
-            latents * self.sqrt_alphas_cumprod[diffusion_steps][:, None, None] + \
-            noises * self.sqrt_one_minus_alphas_cumprod[diffusion_steps][:, None, None]
+        diffusion_steps = torch.rand(
+            size= (latents.size(0), ),
+            device= latents.device
+            )
+        gammas = self.gamma_scheuler(diffusion_steps)
+        alphas, sigmas = self.gamma_to_alpha_sigma(gammas)
 
-        epsilons = self.denoiser(
+        noised_latents = latents * alphas[:, None, None] + noises * sigmas[:, None, None]
+        diffusion_predictions = self.denoiser(
             latents= noised_latents,
             encodings= encodings,
             lengths= lengths,
@@ -175,85 +74,124 @@ class Diffusion(torch.nn.Module):
             diffusion_steps= diffusion_steps,
             )
         
-        return noises, epsilons
+        diffusion_targets = latents * sigmas[:, None, None] + noises * alphas[:, None, None]
+        
+        return diffusion_targets, diffusion_predictions
 
-    def DDIM(
+    def DDPM(
         self,
         encodings: torch.Tensor,
         lengths: torch.Tensor,
-        speech_prompts: torch.FloatTensor,
-        ddim_steps: int,
-        eta: float= 0.0,
-        temperature: float= 1.0,
-        use_tqdm: bool= False
+        speech_prompts: torch.Tensor,
+        eps: float= 1e-7    # minimum at float16 precision
         ):
-        ddim_timesteps = self.Get_DDIM_Steps(
-            ddim_steps= ddim_steps
+        steps = self.Get_Sampling_Steps(
+            steps= self.hp.Diffusion.Max_Step,
+            references= encodings
             )
-        sigmas, alphas, alphas_prev = self.Get_DDIM_Sampling_Parameters(
-            ddim_timesteps= ddim_timesteps,
-            eta= eta
-            )
-        sqrt_one_minus_alphas = (1. - alphas).sqrt()
 
         latents = torch.randn(
             size= (encodings.size(0), self.hp.Audio_Codec.Size, encodings.size(2)),
             device= encodings.device
             )
 
-        setp_range = reversed(range(ddim_steps))
-        if use_tqdm:
-            tqdm(
-                setp_range,
-                desc= '[Diffusion]',
-                total= ddim_steps
-                )
+        for current_steps, next_steps in steps:            
+            gammas = self.gamma_scheuler(current_steps)
+            alphas, sigmas = self.gamma_to_alpha_sigma(gammas)
+            log_snrs = self.gamma_to_log_snr(gammas)
+            alphas, sigmas, log_snrs = alphas[:, None, None], sigmas[:, None, None], log_snrs[:, None, None]
 
-        for diffusion_steps in setp_range:
+            next_gammas = self.gamma_scheuler(next_steps)
+            next_alphas, next_sigmas = self.gamma_to_alpha_sigma(next_gammas)
+            next_log_snrs = self.gamma_to_log_snr(next_gammas)
+            next_alphas, next_sigmas, next_log_snrs = next_alphas[:, None, None], next_sigmas[:, None, None], next_log_snrs[:, None, None]
+
+            coefficients = -torch.expm1(log_snrs - next_log_snrs)
+            
             noised_predictions = self.denoiser(
                 latents= latents,
                 encodings= encodings,
                 lengths= lengths,
                 speech_prompts= speech_prompts,
-                diffusion_steps= torch.full(
-                    size= (encodings.size(0), ),
-                    fill_value= diffusion_steps,
-                    dtype= torch.long,
-                    device= encodings.device
-                    )
+                diffusion_steps= current_steps,
                 )
 
-            audio_codec_encoding_starts = (latents - sqrt_one_minus_alphas[diffusion_steps] * noised_predictions) / alphas[diffusion_steps].sqrt()
-            direction_pointings = (1.0 - alphas_prev[diffusion_steps] - sigmas[diffusion_steps].pow(2.0)) * noised_predictions
-            noises = sigmas[diffusion_steps] * torch.randn_like(latents) * temperature
+            epsilons = latents * alphas - noised_predictions * sigmas
+            # epsilons.clamp_(-1.0, 1.0)  # clipped
 
-            latents = alphas_prev[diffusion_steps].sqrt() * audio_codec_encoding_starts + direction_pointings + noises
+            posterior_means = next_alphas * (latents * (1.0 - coefficients) / alphas + coefficients * epsilons)
+            posterior_log_varainces = torch.log(torch.clamp(next_sigmas ** 2 * coefficients, min= eps))
+
+            noises = torch.randn_like(latents)
+            masks = (current_steps > 0).float().unsqueeze(1).unsqueeze(1) #[Batch, 1, 1]
+            latents = posterior_means + masks * (0.5 * posterior_log_varainces).exp() * noises
+
+        return latents
+            
+            
+    def DDIM(
+        self,
+        encodings: torch.Tensor,
+        lengths: torch.Tensor,
+        speech_prompts: torch.Tensor,
+        ddim_steps: int
+        ):
+        steps = self.Get_Sampling_Steps(
+            steps= ddim_steps,
+            references= encodings
+            )
+
+        latents = torch.randn(
+            size= (encodings.size(0), self.hp.Audio_Codec.Size, encodings.size(2)),
+            device= encodings.device
+            )
+
+        for current_steps, next_steps in steps:            
+            gammas = self.gamma_scheuler(current_steps)
+            alphas, sigmas = self.gamma_to_alpha_sigma(gammas)
+            alphas, sigmas = alphas[:, None, None], sigmas[:, None, None]
+
+            next_gammas = self.gamma_scheuler(next_steps)
+            next_alphas, next_sigmas = self.gamma_to_alpha_sigma(next_gammas)
+            next_alphas, next_sigmas = next_alphas[:, None, None], next_sigmas[:, None, None]
+            
+            noised_predictions = self.denoiser(
+                latents= latents,
+                encodings= encodings,
+                lengths= lengths,
+                speech_prompts= speech_prompts,
+                diffusion_steps= current_steps,
+                )
+            epsilons = latents * alphas - noised_predictions * sigmas
+            # epsilons.clamp_(-1.0, 1.0)  # clipped
+
+            noises = (latents - alphas * epsilons) / sigmas            
+            latents = epsilons * next_alphas + noises * next_sigmas
 
         return latents
 
-    # https://github.com/CompVis/stable-diffusion/blob/main/ldm/modules/diffusionmodules/util.py
-    def Get_DDIM_Steps(
+    def Get_Sampling_Steps(
         self,        
-        ddim_steps: int,
-        ddim_discr_method: str= 'uniform'
+        steps: int,
+        references: torch.Tensor
         ):
-        if ddim_discr_method == 'uniform':            
-            ddim_timesteps = torch.arange(0, self.timesteps, self.timesteps // ddim_steps).long()
-        elif ddim_discr_method == 'quad':
-            ddim_timesteps = torch.linspace(0, (torch.tensor(self.timesteps) * 0.8).sqrt(), ddim_steps).pow(2.0).long()
-        else:
-            raise NotImplementedError(f'There is no ddim discretization method called "{ddim_discr_method}"')
-        
-        ddim_timesteps[-1] = self.timesteps - 1
+        steps = torch.linspace(
+            start= 1.0,
+            end= 0.0,
+            steps= steps + 1,
+            device= references.device
+            )   # [Step + 1]
+        steps = torch.stack([steps[:-1], steps[1:]], dim= 0) # [2, Step]
+        steps = steps.unsqueeze(1).expand(-1, references.size(0), -1)    # [2, Batch, Step]
+        steps = steps.unbind(dim= 2)
 
-        return ddim_timesteps
+        return steps
+    
+    def gamma_to_alpha_sigma(self, gamma, scale = 1):
+        return torch.sqrt(gamma) * scale, torch.sqrt(1 - gamma)
 
-    def Get_DDIM_Sampling_Parameters(self, ddim_timesteps, eta):
-        alphas = self.alphas_cumprod[ddim_timesteps]
-        alphas_prev = self.alphas_cumprod_prev[ddim_timesteps]
-        sigmas = eta * ((1 - alphas_prev) / (1 - alphas) * (1 - alphas / alphas_prev)).sqrt()
-
-        return sigmas, alphas, alphas_prev
+    def gamma_to_log_snr(self, gamma, scale = 1, eps = 1e-7):
+        return torch.log(torch.clamp(gamma * (scale ** 2) / (1 - gamma), min= eps))
 
 class Denoiser(torch.nn.Module):
     def __init__(
@@ -294,7 +232,7 @@ class Denoiser(torch.nn.Module):
                 ),
             Lambda(lambda x: x.unsqueeze(2)),
             Conv1d(
-                in_channels= self.hp.Diffusion.Size,
+                in_channels= self.hp.Diffusion.Size + 1,
                 out_channels= self.hp.Diffusion.Size * 4,
                 kernel_size= 1,
                 w_init_gain= 'relu'
@@ -391,7 +329,8 @@ class Denoiser(torch.nn.Module):
         x = self.postnet(x) * masks
 
         return x
-    
+
+
 class Diffusion_Embedding(torch.nn.Module):
     def __init__(
         self,
@@ -399,13 +338,12 @@ class Diffusion_Embedding(torch.nn.Module):
         ):
         super().__init__()
         self.channels = channels
+        self.weight = torch.nn.Parameter(torch.randn(self.channels // 2))
 
     def forward(self, x: torch.Tensor):
-        half_channels = self.channels // 2  # sine and cosine
-        embeddings = math.log(10000.0) / (half_channels - 1)
-        embeddings = torch.exp(torch.arange(half_channels, device= x.device) * -embeddings)
-        embeddings = x.unsqueeze(1) * embeddings.unsqueeze(0)
-        embeddings = torch.cat([embeddings.sin(), embeddings.cos()], dim= -1)
+        x = x.unsqueeze(1)  # [Batch, 1]
+        embeddings = x * self.weight.unsqueeze(0) * 2.0 * math.pi   # [Batch, Dim // 2]
+        embeddings = torch.cat([x, embeddings.sin(), embeddings.cos()], dim= 1)    # [Batch, Dim + 1]
 
         return embeddings
 
@@ -536,3 +474,22 @@ def Mask_Generate(lengths: torch.Tensor, max_length: Optional[Union[int, torch.T
     max_length = max_length or torch.max(lengths)
     sequence = torch.arange(max_length)[None, :].to(lengths.device)
     return sequence >= lengths[:, None]    # [Batch, Time]
+
+
+
+
+
+# Chen, T. (2023). On the importance of noise scheduling for diffusion models. arXiv preprint arXiv:2301.10972.
+def sigmoid_schedule(t, start=-3.0, end=3, tau=1.0, clip_min=1e-4):
+    # A gamma function based on sigmoid function.
+    start = torch.tensor(start)
+    end = torch.tensor(end)
+    tau = torch.tensor(tau)
+    
+    v_start = (start / tau).sigmoid()
+    v_end = (end / tau).sigmoid()
+    output = ((t * (end - start) + start) / tau).sigmoid()
+    output = (v_end - output) / (v_end - v_start)
+    
+    return output.clamp(clip_min, 1.)
+

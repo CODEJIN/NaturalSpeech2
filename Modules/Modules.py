@@ -131,7 +131,7 @@ class NaturalSpeech2(torch.nn.Module):
             )
         latents_slice = latents_slice.permute(0, 2, 1)
 
-        _, noises, epsilons = self.diffusion(
+        _, diffusion_targets, diffusion_predictions = self.diffusion(
             encodings= encodings_expand_slice,
             lengths= torch.full_like(latent_lengths, fill_value= self.hp.Train.Segment_Size),
             speech_prompts= speech_prompts_for_diffusion,
@@ -139,7 +139,7 @@ class NaturalSpeech2(torch.nn.Module):
             )
 
         return \
-            None, noises, epsilons, duration_predictions, f0_predictions, \
+            None, diffusion_targets, diffusion_predictions, duration_predictions, f0_predictions, \
             attention_softs, attention_hards, attention_logprobs, durations, None, None
 
     def Inference(
