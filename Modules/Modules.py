@@ -210,7 +210,6 @@ class Phoneme_Encoder(torch.nn.Module):
                 channels= self.hp.Encoder.Size,
                 num_head= self.hp.Encoder.Transformer.Head,
                 feedforward_kernel_size= self.hp.Encoder.Transformer.FFN.Kernel_Size,
-                dropout_rate= self.hp.Encoder.Transformer.Dropout_Rate,
                 feedforward_dropout_rate= self.hp.Encoder.Transformer.FFN.Dropout_Rate,
                 )
             for index in range(self.hp.Encoder.Transformer.Stack)
@@ -237,7 +236,6 @@ class FFT_Block(torch.nn.Module):
         channels: int,
         num_head: int,
         feedforward_kernel_size: int,
-        dropout_rate: float= 0.0,
         feedforward_dropout_rate: float= 0.2
         ) -> None:
         super().__init__()
@@ -247,8 +245,7 @@ class FFT_Block(torch.nn.Module):
             key_channels= channels, 
             value_channels= channels,
             calc_channels= channels,
-            num_heads= num_head,
-            dropout_rate= dropout_rate
+            num_heads= num_head
             )
         
         self.ffn = FFN(
@@ -357,7 +354,6 @@ class Speech_Prompter(torch.nn.Module):
                 channels= self.hp.Speech_Prompter.Size,
                 num_head= self.hp.Speech_Prompter.Transformer.Head,
                 feedforward_kernel_size= self.hp.Speech_Prompter.Transformer.FFN.Kernel_Size,
-                dropout_rate= self.hp.Speech_Prompter.Transformer.Dropout_Rate,
                 feedforward_dropout_rate= self.hp.Speech_Prompter.Transformer.FFN.Dropout_Rate,
                 )
             for index in range(self.hp.Speech_Prompter.Transformer.Stack)
@@ -469,8 +465,7 @@ class Variance_Predictor(torch.nn.Module):
         self,
         channels: int,
         stack: int,
-        attention_num_head: int,
-        attention_dropout_rate: float,        
+        attention_num_head: int,        
         conv_kernel_size: int,
         conv_stack_in_stack: int,
         conv_dropout_rate: float
@@ -501,8 +496,7 @@ class Variance_Predictor(torch.nn.Module):
                 key_channels= channels, 
                 value_channels= channels,
                 calc_channels= channels,
-                num_heads= attention_num_head,
-                dropout_rate= attention_dropout_rate
+                num_heads= attention_num_head
                 )
             for index in range(stack)
             ])
@@ -553,7 +547,6 @@ class Duration_Predictor(Variance_Predictor):
             channels= self.hp.Encoder.Size,
             stack= self.hp.Duration_Predictor.Stack,
             attention_num_head= self.hp.Duration_Predictor.Attention.Head,
-            attention_dropout_rate= self.hp.Duration_Predictor.Attention.Dropout_Rate,
             conv_kernel_size= self.hp.Duration_Predictor.Conv.Kernel_Size,
             conv_stack_in_stack= self.hp.Duration_Predictor.Conv.Stack,
             conv_dropout_rate= self.hp.Duration_Predictor.Conv.Dropout_Rate,
@@ -586,7 +579,6 @@ class F0_Predictor(Variance_Predictor):
             channels= self.hp.Encoder.Size,
             stack= self.hp.Duration_Predictor.Stack,
             attention_num_head= self.hp.Duration_Predictor.Attention.Head,
-            attention_dropout_rate= self.hp.Duration_Predictor.Attention.Dropout_Rate,
             conv_kernel_size= self.hp.Duration_Predictor.Conv.Kernel_Size,
             conv_stack_in_stack= self.hp.Duration_Predictor.Conv.Stack,
             conv_dropout_rate= self.hp.Duration_Predictor.Conv.Dropout_Rate,

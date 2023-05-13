@@ -12,7 +12,6 @@ Encoder:
     Transformer:
         Stack: 6
         Head: 8
-        Dropout_Rate: 0.0
         FFN:
             Kernel_Size: 9
             Dropout_Rate: 0.1
@@ -25,7 +24,6 @@ Speech_Prompter:
     Transformer:
         Stack: 6
         Head: 8
-        Dropout_Rate: 0.0
         FFN:
             Kernel_Size: 9
             Dropout_Rate: 0.2
@@ -34,7 +32,6 @@ Duration_Predictor:
     Stack: 10
     Attention:
         Head: 8
-        Dropout_Rate: 0.0
     Conv:
         Kernel_Size: 3
         Stack: 3
@@ -44,7 +41,6 @@ F0_Predictor:
     Stack: 10
     Attention:
         Head: 8
-        Dropout_Rate: 0.0
     Conv:
         Kernel_Size: 3
         Stack: 3
@@ -58,16 +54,14 @@ Diffusion:
         Query_Token: 32
         Query_Size: 512
         Head: 8
-        Dropout_Rate: 0.0
     WaveNet:
         Kernel_Size: 3
         Dilation: 2
         Stack: 40
-        Dropout_Rate: 0.2    
+        Dropout_Rate: 0.2
         Attention:
             Apply_in_Stack: 3
             Head: 8
-            Dropout_Rate: 0.0
 
 Audio_Codec:
     Size: 128
@@ -104,7 +98,7 @@ Train:
             Min: 10
             Max: 200
     Num_Workers: 0
-    Batch_Size: 12
+    Batch_Size: 10
     Segment_Size: 64
     Learning_Rate:
         Initial: 5.0e-4
@@ -147,7 +141,7 @@ Weights_and_Biases:
     # Use: false
     Project: 'NaturalSpeech2'
     Entity: 'codejin'
-    Name: 'VCTK_230513_Attn_Fix'
+    Name: 'VCTK_230513_Attn_Fix2'
     Save_Checkpoint:
         Use: false
         Interval: 50000 # Unlike local, The capacity of WandB is small.

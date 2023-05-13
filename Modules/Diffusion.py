@@ -251,8 +251,7 @@ class Denoiser(torch.nn.Module):
             key_channels= self.hp.Speech_Prompter.Size, 
             value_channels= self.hp.Speech_Prompter.Size,
             calc_channels= self.hp.Diffusion.Pre_Attention.Query_Size,
-            num_heads= self.hp.Diffusion.Pre_Attention.Head,
-            dropout_rate= self.hp.Diffusion.Pre_Attention.Dropout_Rate
+            num_heads= self.hp.Diffusion.Pre_Attention.Head
             )
 
         self.pre_attention_query = torch.nn.Parameter(
@@ -272,8 +271,7 @@ class Denoiser(torch.nn.Module):
                 wavenet_dropout_rate= self.hp.Diffusion.WaveNet.Dropout_Rate,
                 apply_film= (wavenet_index + 1) % self.hp.Diffusion.WaveNet.Attention.Apply_in_Stack == 0,
                 speech_prompt_channels= self.hp.Speech_Prompter.Size,
-                speech_prompt_attention_head= self.hp.Diffusion.WaveNet.Attention.Head,
-                speech_prompt_attention_dropout_rate= self.hp.Diffusion.WaveNet.Attention.Dropout_Rate,
+                speech_prompt_attention_head= self.hp.Diffusion.WaveNet.Attention.Head
                 )
             for wavenet_index in range(self.hp.Diffusion.WaveNet.Stack)
             ])
@@ -358,8 +356,7 @@ class WaveNet(torch.nn.Module):
         wavenet_dropout_rate: float= 0.0,
         apply_film: bool= False,
         speech_prompt_channels: Optional[int]= None,
-        speech_prompt_attention_head: Optional[int]= None,
-        speech_prompt_attention_dropout_rate: float= 0.0,
+        speech_prompt_attention_head: Optional[int]= None
         ):
         super().__init__()
         self.calc_channels = channels
@@ -401,7 +398,6 @@ class WaveNet(torch.nn.Module):
                 value_channels= speech_prompt_channels,
                 calc_channels= channels,
                 num_heads= speech_prompt_attention_head,
-                dropout_rate= speech_prompt_attention_dropout_rate
                 )
             self.film = FilM(
                 channels= channels * 2,

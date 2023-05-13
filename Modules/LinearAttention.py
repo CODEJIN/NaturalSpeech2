@@ -11,8 +11,7 @@ class LinearAttention(torch.nn.Module):
         key_channels: int,
         value_channels: int,
         calc_channels: int,
-        num_heads: int,
-        dropout_rate: float= 0.0,        
+        num_heads: int,       
         ):
         super().__init__()
         assert calc_channels % num_heads == 0
@@ -29,10 +28,9 @@ class LinearAttention(torch.nn.Module):
                 kernel_size= 1,
                 w_init_gain= 'linear'
                 ),
-            # torch.nn.ELU(),
-            # Lambda(lambda x: x + 1.0)
-            # LayerNorm(num_features= calc_channels),
-            # Lambda(lambda x: torch.nn.functional.softplus(x))
+            LayerNorm(num_features= calc_channels),
+            torch.nn.ELU(),
+            Lambda(lambda x: x + 1.0)
             )
         self.key = torch.nn.Sequential(
             LayerNorm(num_features= key_channels),
@@ -42,10 +40,9 @@ class LinearAttention(torch.nn.Module):
                 kernel_size= 1,
                 w_init_gain= 'linear'
                 ),
-            # torch.nn.ELU(),
-            # Lambda(lambda x: x + 1.0)
-            # LayerNorm(num_features= calc_channels),
-            # Lambda(lambda x: torch.nn.functional.softplus(x))
+            LayerNorm(num_features= calc_channels),
+            torch.nn.ELU(),
+            Lambda(lambda x: x + 1.0)
             )
         self.value = torch.nn.Sequential(
             LayerNorm(num_features= value_channels),
@@ -55,10 +52,9 @@ class LinearAttention(torch.nn.Module):
                 kernel_size= 1,
                 w_init_gain= 'linear'
                 ),
-            # torch.nn.ELU(),
-            # Lambda(lambda x: x + 1.0)
-            # LayerNorm(num_features= calc_channels),
-            # Lambda(lambda x: torch.nn.functional.softplus(x))
+            LayerNorm(num_features= calc_channels),
+            torch.nn.ELU(),
+            Lambda(lambda x: x + 1.0)
             )
         
         self.projection = Conv1d(
@@ -67,7 +63,6 @@ class LinearAttention(torch.nn.Module):
             kernel_size= 1,
             w_init_gain= 'linear'
             )
-        self.dropout = torch.nn.Dropout(p= dropout_rate)
         
         self.norm = LayerNorm(num_features= query_channels)
 
@@ -108,8 +103,6 @@ class LinearAttention(torch.nn.Module):
         contexts = einsum(queries, contexts, 'batch head query_d time, batch head query_d value_d -> batch head value_d time')
         contexts = rearrange(contexts, 'batch head dimension time -> batch (head dimension) time')
         contexts = self.projection(contexts)    # [Batch, Enc_d, Enc_t]
-        contexts = self.dropout(contexts)
-
         contexts = self.norm(contexts + residuals)
 
         return contexts

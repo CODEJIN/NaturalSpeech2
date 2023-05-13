@@ -548,6 +548,11 @@ class Trainer:
         audio_predictions = audio_predictions.cpu().numpy()
         f0s = f0s.cpu().numpy()
 
+        durations = [
+            torch.arange(duration.size(0)).repeat_interleave(duration.cpu()).numpy()
+            for duration in durations
+            ]
+
         files = []
         for index in range(tokens.size(0)):
             tags = []
@@ -570,7 +575,7 @@ class Trainer:
             file
             ) in enumerate(zip(
             audio_predictions,
-            durations.cpu().numpy(),
+            durations,
             f0s,
             token_lengths.cpu().numpy(),
             latent_lengths.cpu().numpy(),
