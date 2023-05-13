@@ -74,7 +74,7 @@ class Diffusion(torch.nn.Module):
             diffusion_steps= diffusion_steps,
             )
         
-        diffusion_targets = latents * sigmas[:, None, None] + noises * alphas[:, None, None]
+        diffusion_targets = noises * alphas[:, None, None] - latents * sigmas[:, None, None]
         
         return diffusion_targets, diffusion_predictions
 

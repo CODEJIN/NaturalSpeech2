@@ -147,7 +147,7 @@ Weights_and_Biases:
     # Use: false
     Project: 'NaturalSpeech2'
     Entity: 'codejin'
-    Name: 'VCTK'
+    Name: 'VCTK_230513_Loss_Fix'
     Save_Checkpoint:
         Use: false
         Interval: 50000 # Unlike local, The capacity of WandB is small.
