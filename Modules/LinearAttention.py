@@ -12,21 +12,17 @@ class LinearAttention(torch.nn.Module):
         value_channels: int,
         calc_channels: int,
         num_heads: int,
-        dropout_rate: float= 0.0,
-        use_scale: bool= True,
-        use_residual: bool= True,
-        use_norm: bool= False
+        dropout_rate: float= 0.0,        
         ):
         super().__init__()
         assert calc_channels % num_heads == 0
         self.calc_channels = calc_channels
         self.num_heads = num_heads
-        self.use_scale = use_scale
-        self.use_residual = use_residual
-        self.use_norm = use_norm
 
-        # Too large conv outputs make inf and nan problem.
+        self.query_scale = num_heads ** -0.5
+        
         self.query = torch.nn.Sequential(
+            LayerNorm(num_features= query_channels),
             Conv1d(
                 in_channels= query_channels,
                 out_channels= calc_channels,
@@ -35,10 +31,11 @@ class LinearAttention(torch.nn.Module):
                 ),
             # torch.nn.ELU(),
             # Lambda(lambda x: x + 1.0)
-            LayerNorm(num_features= calc_channels),
-            Lambda(lambda x: torch.nn.functional.softplus(x))            
+            # LayerNorm(num_features= calc_channels),
+            # Lambda(lambda x: torch.nn.functional.softplus(x))
             )
         self.key = torch.nn.Sequential(
+            LayerNorm(num_features= key_channels),
             Conv1d(
                 in_channels= key_channels,
                 out_channels= calc_channels,
@@ -47,10 +44,11 @@ class LinearAttention(torch.nn.Module):
                 ),
             # torch.nn.ELU(),
             # Lambda(lambda x: x + 1.0)
-            LayerNorm(num_features= calc_channels),
-            Lambda(lambda x: torch.nn.functional.softplus(x))
+            # LayerNorm(num_features= calc_channels),
+            # Lambda(lambda x: torch.nn.functional.softplus(x))
             )
         self.value = torch.nn.Sequential(
+            LayerNorm(num_features= value_channels),
             Conv1d(
                 in_channels= value_channels,
                 out_channels= calc_channels,
@@ -59,9 +57,10 @@ class LinearAttention(torch.nn.Module):
                 ),
             # torch.nn.ELU(),
             # Lambda(lambda x: x + 1.0)
-            LayerNorm(num_features= calc_channels),
-            Lambda(lambda x: torch.nn.functional.softplus(x))
+            # LayerNorm(num_features= calc_channels),
+            # Lambda(lambda x: torch.nn.functional.softplus(x))
             )
+        
         self.projection = Conv1d(
             in_channels= calc_channels,
             out_channels= query_channels,
@@ -69,12 +68,8 @@ class LinearAttention(torch.nn.Module):
             w_init_gain= 'linear'
             )
         self.dropout = torch.nn.Dropout(p= dropout_rate)
-
-        if use_scale:
-            self.scale = torch.nn.Parameter(torch.full(size= (1,), fill_value= 0.001))
-
-        if use_norm:
-            self.norm = LayerNorm(num_features= query_channels)
+        
+        self.norm = LayerNorm(num_features= query_channels)
 
     def forward(
         self,
@@ -105,7 +100,9 @@ class LinearAttention(torch.nn.Module):
             keys.masked_fill_(key_padding_masks[:, None, None, :], -1e+4)
             values.masked_fill_(key_padding_masks[:, None, None, :], -1e+4)
 
-        keys = (keys + 1e-3).softmax(dim= 3)
+        queries = queries.softmax(dim= 2) * self.query_scale    # channel softmax
+        keys = keys.softmax(dim= 3)    # time softmax
+        values = values / values.size(2)
         
         contexts = einsum(keys, values, 'batch head key_d time, batch head value_d time -> batch head key_d value_d')
         contexts = einsum(queries, contexts, 'batch head query_d time, batch head query_d value_d -> batch head value_d time')
@@ -113,14 +110,6 @@ class LinearAttention(torch.nn.Module):
         contexts = self.projection(contexts)    # [Batch, Enc_d, Enc_t]
         contexts = self.dropout(contexts)
 
-        if self.use_scale:
-            contexts = self.scale * contexts
-
-        if self.use_residual:
-            contexts = contexts + residuals
-
-        if self.use_norm:
-            contexts = self.norm(contexts)
-
+        contexts = self.norm(contexts + residuals)
 
         return contexts
