@@ -891,7 +891,7 @@ def Metadata_Generate(eval: bool= False):
         for speaker, f0_list in f0_dict.items():
             f0 = np.hstack(f0_list)
             f0 = np.clip(f0, 0, np.inf)
-            f0 = f0[f0 != 0.0]
+            f0 = f0[f0 != 0.0].astype(np.float32)
 
             f0_info_dict[speaker] = {
                 'Mean': f0.mean().item(),
