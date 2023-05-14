@@ -152,7 +152,7 @@ def Pattern_Generate(
     mel = mel[:, initial_silence_frame:last_silence_frame]
     f0 = f0[initial_silence_frame:last_silence_frame]
     
-    return audio.astype(np.float32), latents.astype(np.float32), mel.astype(np.float32), f0.astype(np.float32)
+    return audio.astype(np.float16), latents.astype(np.float16), mel.astype(np.float16), f0.astype(np.float16)
 
 def Pattern_File_Generate(path: str, speaker: str, emotion: str, language: str, gender: str, dataset: str, text: str, pronunciation: str, tag: str='', eval: bool= False):
     pattern_path = hp.Train.Eval_Pattern.Path if eval else hp.Train.Train_Pattern.Path
