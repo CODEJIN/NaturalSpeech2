@@ -35,7 +35,9 @@ Shen, K., Ju, Z., Tan, X., Liu, Y., Leng, Y., He, L., ... & Bian, J. (2023). Nat
     * [VCTK Dataset](https://datashare.ed.ac.uk/handle/10283/2651)
         * This repository used the VCTK092 from Torchaudio(https://datashare.is.ed.ac.uk/bitstream/handle/10283/3443/VCTK-Corpus-0.92.zip)
 * Supported but not tested
-    * [Libri Dataset](https://datashare.ed.ac.uk/handle/10283/2651)
+    * [LibriTTS Dataset](https://www.openslr.org/60/)
+    * [Mulitilingual LibriSpeech Dataset](https://www.openslr.org/94/)
+        * Only English language dataset generation is tested.
 
 # Hyper parameters
 Before proceeding, please set the pattern, inference, and checkpoint paths in [Hyper_Parameters.yaml](Hyper_Parameters.yaml) according to your environment.

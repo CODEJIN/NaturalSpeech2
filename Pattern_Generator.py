@@ -16,7 +16,7 @@ from encodec import EncodecModel
 
 from Arg_Parser import Recursive_Parse
 
-using_Extension = [x.upper() for x in ['.wav', '.m4a', '.flac']]
+using_extension = [x.upper() for x in ['.wav', '.m4a', '.flac', '.flac']]
 regex_checker = re.compile('[가-힣A-Za-z,.?!\'\-\s]+')
 
 if __name__ == '__main__':
@@ -213,7 +213,7 @@ def Selvas_Info_Load(path: str):
     for root, _, files in os.walk(path):
         for file in files:
             file = os.path.join(root, file).replace('\\', '/')
-            if not os.path.splitext(file)[1].upper() in using_Extension:
+            if not os.path.splitext(file)[1].upper() in using_extension:
                 continue
             if any(['lmy04282' in file, 'lmy07365' in file, 'lmy05124' in file]):
                 continue
@@ -433,7 +433,7 @@ def Basic_Info_Load(
     for root, _, files in os.walk(path):
         for file in files:
             file = os.path.join(root, file).replace('\\', '/')
-            if not os.path.splitext(file)[1].upper() in using_Extension:
+            if not os.path.splitext(file)[1].upper() in using_extension:
                 continue
             paths.append(file)
     
@@ -499,7 +499,7 @@ def VCTK_Info_Load(path: str):
     for root, _, files in os.walk(path):
         for file in files:
             file = os.path.join(root, file).replace('\\', '/')
-            if not os.path.splitext(file)[1].upper() in using_Extension:
+            if not os.path.splitext(file)[1].upper() in using_extension:
                 continue
             elif '_mic1' in file:
                 continue
@@ -658,7 +658,7 @@ def Libri_Info_Load(path: str):
     for root, _, files in os.walk(path):
         for file in files:
             file = os.path.join(root, file).replace('\\', '/')
-            if not os.path.splitext(file)[1].upper() in using_Extension:
+            if not os.path.splitext(file)[1].upper() in using_extension:
                 continue
             paths.append(file)
 
@@ -701,7 +701,7 @@ def LJ_Info_Load(path: str):
     for root, _, files in os.walk(path):
         for file in files:
             file = os.path.join(root, file).replace('\\', '/')
-            if not os.path.splitext(file)[1].upper() in using_Extension:
+            if not os.path.splitext(file)[1].upper() in using_extension:
                 continue
             paths.append(file)
 
@@ -734,6 +734,55 @@ def LJ_Info_Load(path: str):
     print('LJ info generated: {}'.format(len(paths)))
     return paths, text_dict, pronunciation_dict, speaker_dict, emotion_dict, language_dict, gender_dict
 
+def MLS_Info_Load(path: str):
+    paths, texts, speakers = [], [], []
+    # for partition in ['dev', 'test', 'train']:
+    for partition in ['dev', 'test']:
+        for line in open(os.path.join(path, partition, 'transcripts.txt').replace('\\', '/'), 'r', encoding= 'utf-8-sig').readlines():
+            file_path, text = line.strip().split('\t')
+            speaker, book_id, _ = file_path.strip().split('_')
+            file_path = os.path.join(path, partition, 'audio', speaker, book_id, f'{file_path}.opus')
+            if not os.path.exists(file_path):
+                continue                        
+            text = Text_Filtering(unidecode(text))
+            if text is None:
+                continue            
+            paths.append(file_path)
+            texts.append(text)
+            speakers.append(int(speaker))
+
+    text_dict = {
+        path: text
+        for path, text in zip(paths, texts)
+        }
+    
+    pronunciations = Phonemize(
+        texts= texts,
+        language= 'English'
+        )    
+    pronunciation_dict = {
+        path: pronunciation
+        for path, pronunciation in zip(paths, pronunciations)
+        }
+
+    speaker_dict = {
+        path: f'MLS.{speaker:05d}'
+        for path, speaker in zip(paths, speakers)
+        }
+    emotion_dict = {path: 'Neutral' for path in paths}
+    language_dict = {path: 'English' for path in paths}
+    
+    gender_dict = {}
+    for line in open(os.path.join(os.path.join(path, 'metainfo.txt').replace('\\', '/')), 'r', encoding= 'utf-8-sig').readlines()[1:]:
+        speaker, gender, *_ = [x.strip() for x in line.strip().split('|')]
+        gender_dict[int(speaker)] = 'Male' if gender == 'M' else 'Female'
+    gender_dict = {
+        path: gender_dict[speaker]
+        for path, speaker in zip(paths, speakers)
+        }
+
+    print('MLS info generated: {}'.format(len(paths)))
+    return paths, text_dict, pronunciation_dict, speaker_dict, emotion_dict, language_dict, gender_dict
 
 def Split_Eval(paths: List[str], eval_ratio: float= 0.001, min_eval: int= 1):
     shuffle(paths)
@@ -915,6 +964,7 @@ if __name__ == '__main__':
     argParser.add_argument("-vctk", "--vctk_path", required=False)
     argParser.add_argument("-libri", "--libri_path", required=False)
     argParser.add_argument("-lj", "--lj_path", required=False)
+    argParser.add_argument("-mls", "--mls_path", required=False)
 
     argParser.add_argument("-evalr", "--eval_ratio", default= 0.001, type= float)
     argParser.add_argument("-evalm", "--eval_min", default= 1, type= int)
@@ -1026,6 +1076,20 @@ if __name__ == '__main__':
         dataset_dict.update({path: 'LJ' for paths in lj_paths for path in paths})
         tag_dict.update({path: '' for paths in lj_paths for path in paths})
 
+    if not args.mls_path is None:
+        mls_paths, mls_text_dict, mls_pronunciation_dict, mls_speaker_dict, mls_emotion_dict, mls_language_dict, mls_gender_dict = MLS_Info_Load(path= args.mls_path)
+        mls_paths = Split_Eval(mls_paths, args.eval_ratio, args.eval_min)
+        train_paths.extend(mls_paths[0])
+        eval_paths.extend(mls_paths[1])
+        text_dict.update(mls_text_dict)
+        pronunciation_dict.update(mls_pronunciation_dict)
+        speaker_dict.update(mls_speaker_dict)
+        emotion_dict.update(mls_emotion_dict)
+        language_dict.update(mls_language_dict)
+        gender_dict.update(mls_gender_dict)
+        dataset_dict.update({path: 'MLS' for paths in mls_paths for path in paths})
+        tag_dict.update({path: '' for paths in mls_paths for path in paths})
+
     # if len(train_paths) == 0 or len(eval_paths) == 0:
     #     raise ValueError('Total info count must be bigger than 0.')
 
@@ -1087,3 +1151,4 @@ if __name__ == '__main__':
 
 # python Pattern_Generator.py -hp Hyper_Parameters.yaml -lj D:\Rawdata\LJSpeech
 # python Pattern_Generator.py -hp Hyper_Parameters.yaml -vctk D:\Rawdata\VCTK092
+# python Pattern_Generator.py -hp Hyper_Parameters.yaml -mls D:\Rawdata\mls_english_opus
