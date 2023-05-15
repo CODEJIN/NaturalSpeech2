@@ -14,7 +14,7 @@ Encoder:
         Head: 8
         FFN:
             Kernel_Size: 9
-            Dropout_Rate: 0.1
+            Dropout_Rate: 0.2
 
 Alignment_Learning_Framework:
     Condition_Attention_Head: 8

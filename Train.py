@@ -417,7 +417,7 @@ class Trainer:
                     speech_prompts= speech_prompts[index].unsqueeze(0).to(self.device),
                     ddim_steps= max(self.hp.Diffusion.Max_Step // 10, 100)
                     )
-                target_audios = self.model.encodec.decode([[latents.to(self.device), None]]).squeeze(1)
+                target_audios = self.model.encodec.decode([[latents[index].unsqueeze(0).to(self.device), None]]).squeeze(1)
             
             token_length = token_lengths[index].item()
             target_latent_length = latent_lengths[index].item()
@@ -437,7 +437,7 @@ class Trainer:
                 win_size= self.hp.Sound.Frame_Shift * 4,
                 fmin= 0,
                 fmax= None
-                ).squeeze(0).cpu().numpy()            
+                ).squeeze(0).cpu().numpy()
             if prediction_audio_length > self.hp.Sound.Frame_Shift * 10:
                 prediction_feature = mel_spectrogram(
                     prediction_audio.unsqueeze(0),
