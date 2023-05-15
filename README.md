@@ -12,9 +12,15 @@ Shen, K., Ju, Z., Tan, X., Liu, Y., Leng, Y., He, L., ... & Bian, J. (2023). Nat
 * Linear attention is applied instead of dot product-based multihead attention.
     * This change was made to reduce memory usage and improve computational speed in insufficient enviornment.
     * This may be a reason of the performance degradation.
-* The CE-RVQ loss is selectively applied to a random subset of RVQ layers at each step.
-    * Since CE-RVQ consumes a significant amount of memory, I applied sampling to reduce memory usage.
-    * If you want to apply it to the entire RVQ layers, please modify the hyperparameter `hp.Diffusion.Num_CERVQ_Sample`.
+* About CE-RVQ
+    * The CE-RVQ implementation in the current repository is incomplete.
+        * I had doubts about the loss calculation formula mentioned in the paper, so the previous implementation has been commented out.
+        * I think the current implementation aligns with the purpose of CE-RVQ, but deviates from the paper. 
+        * The current implementation has not been verified how positively this loss contributes to model training.
+        * I would greatly appreciate any advice or suggestions you may have regarding this matter.
+    * The CE-RVQ loss is selectively applied to a random subset of RVQ layers at each step.
+        * Since CE-RVQ consumes a significant amount of memory, I applied sampling to reduce memory usage.
+        * If you want to apply it to the entire RVQ layers, please modify the hyperparameter `hp.Diffusion.Num_CERVQ_Sample`.
 * The audio codec has been changed to Meta's `Encodec 24Khz`.
     * This is done to reduce the time spent training a separate audio codec.
     * The model uses 16Khz audio, but no audio resampling is applied.

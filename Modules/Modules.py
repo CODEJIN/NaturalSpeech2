@@ -639,7 +639,67 @@ def Mask_Generate(lengths: torch.Tensor, max_length: Optional[Union[int, torch.T
     sequence = torch.arange(max_length)[None, :].to(lengths.device)
     return sequence >= lengths[:, None]    # [Batch, Time]
 
+# # I am not sure this is correct.
+# class CE_RVQ(torch.nn.Module):
+#     def __init__(
+#         self,
+#         encodec: EncodecModel,
+#         rvq_sample: int= 4
+#         ):
+#         super().__init__()        
+#         self.codebooks = torch.nn.ModuleList([
+#             torch.nn.Embedding(
+#             num_embeddings= 1024,
+#             embedding_dim= 128,
+#             _weight= vq_layer._codebook.embed,
+#             _freeze= True
+#             )
+#             for vq_layer in encodec.quantizer.vq.layers
+#             ])   # [Num_Codebook, Latent_d] * Num_VQ ([1024, 128] * 32)
+        
+#         self.num_vq = encodec.quantizer.n_q
+#         self.rvq_sample = rvq_sample
 
+#     def forward(
+#         self,
+#         diffusion_starts: torch.FloatTensor,
+#         target_latent_codes: torch.LongTensor
+#         ):
+#         '''
+#         diffusion_starts: [Batch, Latent_d, Latent_t]
+#         target_latent_codes: [Batch, Num_VQ, Latent_t]
+#         '''
+#         sample_rvq_indices = sample(range(self.num_vq), self.rvq_sample)
+
+#         with torch.no_grad():
+#             target_vq_latents = torch.stack([
+#                 codebook(latent_codes)  # [Batch, Latent_t, Latent_d]
+#                 for latent_codes, codebook in zip(target_latent_codes.permute(1, 0, 2)[1:], self.codebooks[1:])
+#                 ], dim= 0)  # [Num_VQ - 1, Batch, Latent_t, Latent_d]
+#             target_vq_latents = rearrange(target_vq_latents, 'num_vq batch latent_t latent_d -> batch latent_d num_vq latent_t')
+#             target_vq_latents = torch.cat([target_vq_latents, torch.zeros_like(target_vq_latents[:, :, :1])], dim= 2)
+#             target_vq_latents = target_vq_latents.flip(dims= [2,]).cumsum(dim= 0).flip(dims= [2,])
+#             target_vq_latents = target_vq_latents[:, :, sample_rvq_indices, :]        
+
+#         # Num_VQ == (Diff_0 - RVQ1 - ... - RVQ31, ..., Diff_0 - RVQ31, Diff_0)
+#         prediction_residual_vq_latents = rearrange(diffusion_starts, 'batch latent_d latent_t -> batch latent_d 1 latent_t').expand(-1, -1, self.rvq_sample, -1)
+#         prediction_residual_vq_latents = rearrange(
+#             prediction_residual_vq_latents - target_vq_latents.detach(),
+#             'batch latent_d num_vq latent_t -> batch latent_d 1 num_vq latent_t'
+#             )
+        
+#         embeddings = rearrange(
+#             torch.stack([self.codebooks[index].weight for index in sample_rvq_indices], dim= 0),
+#             'num_vq num_codebook latent_d -> 1 latent_d num_codebook num_vq 1'
+#             )
+#         logits = (prediction_residual_vq_latents - embeddings).pow(2.0).mean(dim= 1) # [Batch, Num_Codebook, Num_VQ, Latent_t]
+
+#         targets = target_latent_codes[:, sample_rvq_indices]
+        
+#         return logits, targets
+
+
+# I am not sure this is correct.
 class CE_RVQ(torch.nn.Module):
     def __init__(
         self,
@@ -672,19 +732,18 @@ class CE_RVQ(torch.nn.Module):
         sample_rvq_indices = sample(range(self.num_vq), self.rvq_sample)
 
         with torch.no_grad():
-            target_vq_latents = torch.stack([
+            target_remove_rvq_latents = torch.stack([
                 codebook(latent_codes)  # [Batch, Latent_t, Latent_d]
-                for latent_codes, codebook in zip(target_latent_codes.permute(1, 0, 2)[1:], self.codebooks[1:])
+                for latent_codes, codebook in zip(target_latent_codes.permute(1, 0, 2), self.codebooks)
                 ], dim= 0)  # [Num_VQ - 1, Batch, Latent_t, Latent_d]
-            target_vq_latents = rearrange(target_vq_latents, 'num_vq batch latent_t latent_d -> batch latent_d num_vq latent_t')
-            target_vq_latents = torch.cat([target_vq_latents, torch.zeros_like(target_vq_latents[:, :, :1])], dim= 2)
-            target_vq_latents = target_vq_latents.flip(dims= [2,]).cumsum(dim= 0).flip(dims= [2,])
-            target_vq_latents = target_vq_latents[:, :, sample_rvq_indices, :]        
+            target_remove_rvq_latents = rearrange(target_remove_rvq_latents, 'num_vq batch latent_t latent_d -> batch latent_d num_vq latent_t')            
+            target_remove_rvq_latents = target_remove_rvq_latents.sum(dim= 2, keepdim= True) - target_remove_rvq_latents
+            target_remove_rvq_latents = target_remove_rvq_latents[:, :, sample_rvq_indices, :]
 
-        # Num_VQ == (Diff_0 - RVQ1 - ... - RVQ31, ..., Diff_0 - RVQ31, Diff_0)
-        prediction_residual_vq_latents = rearrange(diffusion_starts, 'batch latent_d latent_t -> batch latent_d 1 latent_t').expand(-1, -1, self.rvq_sample, -1)
-        prediction_residual_vq_latents = rearrange(
-            prediction_residual_vq_latents - target_vq_latents.detach(),
+        # remain only target index's vq value
+        prediction_vq_latents = rearrange(diffusion_starts, 'batch latent_d latent_t -> batch latent_d 1 latent_t').expand(-1, -1, self.rvq_sample, -1)
+        prediction_vq_latents = rearrange(
+            prediction_vq_latents - target_remove_rvq_latents.detach(),
             'batch latent_d num_vq latent_t -> batch latent_d 1 num_vq latent_t'
             )
         
@@ -692,8 +751,8 @@ class CE_RVQ(torch.nn.Module):
             torch.stack([self.codebooks[index].weight for index in sample_rvq_indices], dim= 0),
             'num_vq num_codebook latent_d -> 1 latent_d num_codebook num_vq 1'
             )
-        logits = (prediction_residual_vq_latents - embeddings).pow(2.0).mean(dim= 1) # [Batch, Num_Codebook, Num_VQ, Latent_t]
-
+        logits = -(prediction_vq_latents - embeddings).pow(2.0).mean(dim= 1) # [Batch, Num_Codebook, Num_VQ, Latent_t], minus is to make lower distance better
+        
         targets = target_latent_codes[:, sample_rvq_indices]
         
         return logits, targets
