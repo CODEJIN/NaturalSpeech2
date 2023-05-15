@@ -12,6 +12,9 @@ Shen, K., Ju, Z., Tan, X., Liu, Y., Leng, Y., He, L., ... & Bian, J. (2023). Nat
 * Linear attention is applied instead of dot product-based multihead attention.
     * This change was made to reduce memory usage and improve computational speed in insufficient enviornment.
     * This may be a reason of the performance degradation.
+* The CE-RVQ loss is selectively applied to a random subset of RVQ layers at each step.
+    * Since CE-RVQ consumes a significant amount of memory, I applied sampling to reduce memory usage.
+    * If you want to apply it to the entire RVQ layers, please modify the hyperparameter `hp.Diffusion.Num_CERVQ_Sample`.
 * The audio codec has been changed to Meta's `Encodec 24Khz`.
     * This is done to reduce the time spent training a separate audio codec.
     * The model uses 16Khz audio, but no audio resampling is applied.
@@ -26,7 +29,7 @@ Shen, K., Ju, Z., Tan, X., Liu, Y., Leng, Y., He, L., ... & Bian, J. (2023). Nat
     * Using external modules such as Montreal Force Alignment (MFA) may have benefits in terms of training speed or stability, but I prioritized simplifying the training process.
     * A weight has been applied to correct the relatively large MLE loss used in MAS.
 * Padding is applied between tokens like `'A <P> B <P> C ....'`
-    * I could not verify whether there was a difference in performance depending on its usage.
+    * I could not verify whether there was a difference in performance depending on its usage.    
 
 # Supported dataset
 * To apply zero-shot reported in the paper, I believe that it is necessary to have as many speakers as possible in the training data, but I were unable to test [Multilingual LibriSpeech](https://www.openslr.org/94/) due to current environment.

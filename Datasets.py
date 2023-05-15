@@ -26,7 +26,7 @@ def Token_Stack(tokens: List[np.ndarray], token_dict, max_length: Optional[int]=
 def Latent_Stack(latents: List[np.ndarray], max_length: Optional[int]= None):
     max_latent_length = max_length or max([latent.shape[1] for latent in latents])
     latents = np.stack(
-        [np.pad(latent, [[0, 0], [0, max_latent_length - latent.shape[1]]], constant_values= 0.0) for latent in latents],
+        [np.pad(latent, [[0, 0], [0, max_latent_length - latent.shape[1]]], constant_values= 0) for latent in latents],
         axis= 0
         )
     return latents
@@ -61,8 +61,6 @@ class Dataset(torch.utils.data.Dataset):
     def __init__(
         self,
         token_dict: Dict[str, int],
-        latent_min: float,
-        latent_max: float,
         f0_info_dict: Dict[str, Dict[str, float]],
         pattern_path: str,
         metadata_file: str,
@@ -76,8 +74,6 @@ class Dataset(torch.utils.data.Dataset):
         ):
         super().__init__()
         self.token_dict = token_dict
-        self.latent_min = latent_min
-        self.latent_max = latent_max
         self.f0_info_dict = f0_info_dict
         self.pattern_path = pattern_path
 
@@ -117,13 +113,11 @@ class Dataset(torch.utils.data.Dataset):
         non-compressed latent is for speech prompt.        
         '''
         path = os.path.join(self.pattern_path, self.patterns[idx]).replace('\\', '/')
-        token, latent, f0, mel, speaker = self.Pattern_LRU_Cache(path)
-        
-        compressed_latent = (latent - self.latent_min) / (self.latent_max - self.latent_min) * 2.0 - 1.0   # Diffusion requires range -1.0 to 1.0.
+        token, latent, f0, mel = self.Pattern_LRU_Cache(path)
         
         attention_prior = self.attention_prior_generator.get_prior(latent.shape[1], token.shape[0])
 
-        return token, compressed_latent, latent, f0, mel, attention_prior
+        return token, latent, f0, mel, attention_prior
     
     def Pattern_LRU_Cache(self, path: str):
         pattern_dict = pickle.load(open(path, 'rb'))
@@ -137,7 +131,7 @@ class Dataset(torch.utils.data.Dataset):
         f0 = pattern_dict['F0']        
         f0 = np.where(f0 != 0.0, (f0 - self.f0_info_dict[speaker]['Mean']) / self.f0_info_dict[speaker]['Std'], 0.0)
 
-        return token, pattern_dict['Latent'], f0, pattern_dict['Mel'], speaker
+        return token, pattern_dict['Latent'], f0, pattern_dict['Mel']
 
     def __len__(self):
         return len(self.patterns)    
@@ -182,7 +176,7 @@ class Inference_Dataset(torch.utils.data.Dataset):
         audio = librosa.util.normalize(audio) * 0.95
         audio = audio[:audio.shape[0] - (audio.shape[0] % self.hop_size)]
 
-        speech_prompt_latent = self.encodec.quantizer.decode(self.encodec.encode(torch.from_numpy(audio)[None, None])[0][0].permute(1, 0, 2)).squeeze(0).numpy()  # [128, Audio_t / 320]
+        speech_prompt_latent = self.encodec.encode(torch.from_numpy(audio)[None, None])[0][0].squeeze(0).short().numpy()  # [32, Audio_t / 320]
 
         return token, speech_prompt_latent, text, pronunciation, reference
 
@@ -197,7 +191,7 @@ class Collater:
         self.token_dict = token_dict
 
     def __call__(self, batch):
-        tokens, compressed_latents, latents, f0s, mels, attention_priors = zip(*batch)
+        tokens, latents, f0s, mels, attention_priors = zip(*batch)
         token_lengths = np.array([token.shape[0] for token in tokens])
         latent_lengths = np.array([latent.shape[1] for latent in latents])
         speech_prompt_length = latent_lengths.min() // 2
@@ -219,7 +213,7 @@ class Collater:
         speech_prompts = Latent_Stack(speech_prompts)
         speech_prompts_for_diffusion = Latent_Stack(speech_prompts_for_diffusion)        
         latents = Latent_Stack(
-            latents= compressed_latents
+            latents= latents
             )
         f0s = F0_Stack(
             f0s= f0s
@@ -235,9 +229,9 @@ class Collater:
         
         tokens = torch.LongTensor(tokens)   # [Batch, Token_t]
         token_lengths = torch.LongTensor(token_lengths)   # [Batch]
-        speech_prompts = torch.FloatTensor(speech_prompts)
-        speech_prompts_for_diffusion = torch.FloatTensor(speech_prompts_for_diffusion)
-        latents = torch.FloatTensor(latents)    # [Batch, Latent_d, Latent_t]
+        speech_prompts = torch.LongTensor(speech_prompts)
+        speech_prompts_for_diffusion = torch.LongTensor(speech_prompts_for_diffusion)
+        latents = torch.LongTensor(latents)    # [Batch, Latent_d, Latent_t]
         latent_lengths = torch.LongTensor(latent_lengths)   # [Batch]
         f0s = torch.FloatTensor(f0s)    # [Batch, Latent_t]
         mels = torch.FloatTensor(mels)  # [Batch, Mel_d, Mel_t]
@@ -270,6 +264,6 @@ class Inference_Collater:
         
         tokens = torch.LongTensor(tokens)   # [Batch, Token_t]
         token_lengths = torch.LongTensor(token_lengths)   # [Batch]
-        speech_prompts = torch.FloatTensor(speech_prompts)
+        speech_prompts = torch.LongTensor(speech_prompts)
         
         return tokens, token_lengths, speech_prompts, texts, pronunciations, references

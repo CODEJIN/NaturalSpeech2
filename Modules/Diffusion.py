@@ -34,20 +34,20 @@ class Diffusion(torch.nn.Module):
         latents: [Batch, Latent_d, Audio_ct]
         '''
         if not latents is None:    # train
-            diffusion_targets, diffusion_predictions = self.Train(
+            diffusion_targets, diffusion_predictions, diffusion_starts = self.Train(
                 latents= latents,
                 encodings= encodings,
                 lengths= lengths,
                 speech_prompts= speech_prompts
                 )
-            return None, diffusion_targets, diffusion_predictions
+            return None, diffusion_targets, diffusion_predictions, diffusion_starts
         else:   # inference
             latents = self.DDPM(
                 encodings= encodings,
                 lengths= lengths,
                 speech_prompts= speech_prompts,
                 )
-            return latents, None, None
+            return latents, None, None, None
 
     def Train(
         self,
@@ -75,8 +75,11 @@ class Diffusion(torch.nn.Module):
             )
         
         diffusion_targets = noises * alphas[:, None, None] - latents * sigmas[:, None, None]
+
+
+        diffusion_starts = latents * alphas[:, None, None] - diffusion_predictions * sigmas[:, None, None]
         
-        return diffusion_targets, diffusion_predictions
+        return diffusion_targets, diffusion_predictions, diffusion_starts
 
     def DDPM(
         self,
@@ -127,7 +130,6 @@ class Diffusion(torch.nn.Module):
             latents = posterior_means + masks * (0.5 * posterior_log_varainces).exp() * noises
 
         return latents
-            
             
     def DDIM(
         self,
@@ -470,10 +472,6 @@ def Mask_Generate(lengths: torch.Tensor, max_length: Optional[Union[int, torch.T
     max_length = max_length or torch.max(lengths)
     sequence = torch.arange(max_length)[None, :].to(lengths.device)
     return sequence >= lengths[:, None]    # [Batch, Time]
-
-
-
-
 
 # Chen, T. (2023). On the importance of noise scheduling for diffusion models. arXiv preprint arXiv:2301.10972.
 def sigmoid_schedule(t, start=-3.0, end=3, tau=1.0, clip_min=1e-4):

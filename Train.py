@@ -84,15 +84,10 @@ class Trainer:
 
     def Dataset_Generate(self):
         token_dict = yaml.load(open(self.hp.Token_Path, 'r', encoding= 'utf-8-sig'), Loader=yaml.Loader)
-        latent_range_info_dict = yaml.load(open(self.hp.Latent_Range_Info_Path, 'r'), Loader=yaml.Loader)
-        self.latent_min = min([x['Min'] for x in latent_range_info_dict.values()])
-        self.latent_max = max([x['Max'] for x in latent_range_info_dict.values()])
         f0_info_dict = yaml.load(open(self.hp.F0_Info_Path, 'r'), Loader=yaml.Loader)
 
         train_dataset = Dataset(
             token_dict= token_dict,
-            latent_min= self.latent_min,
-            latent_max= self.latent_max,
             f0_info_dict= f0_info_dict,
             pattern_path= self.hp.Train.Train_Pattern.Path,
             metadata_file= self.hp.Train.Train_Pattern.Metadata_File,
@@ -106,8 +101,6 @@ class Trainer:
             )
         eval_dataset = Dataset(
             token_dict= token_dict,
-            latent_min= self.latent_min,
-            latent_max= self.latent_max,
             f0_info_dict= f0_info_dict,
             pattern_path= self.hp.Train.Eval_Pattern.Path,
             metadata_file= self.hp.Train.Eval_Pattern.Metadata_File,
@@ -169,14 +162,11 @@ class Trainer:
             )
 
     def Model_Generate(self):
-        self.model = NaturalSpeech2(
-            self.hp,
-            latent_min= self.latent_min,
-            latent_max= self.latent_max
-            ).to(self.device)
+        self.model = NaturalSpeech2(self.hp).to(self.device)
         self.criterion_dict = {
             'MSE': torch.nn.MSELoss(reduction= 'none').to(self.device),
             'MAE': torch.nn.L1Loss(reduction= 'none').to(self.device),
+            'CE': torch.nn.CrossEntropyLoss(reduction= 'none').to(self.device),
             'Attention_Binarization': AttentionBinarizationLoss(),
             'Attention_CTC': AttentionCTCLoss(),
             }
@@ -209,7 +199,8 @@ class Trainer:
         attention_priors = attention_priors.to(self.device, non_blocking=True)
 
         with torch.cuda.amp.autocast(enabled= self.hp.Use_Mixed_Precision):
-            _, diffusion_targets, diffusion_predictions, duration_predictions, f0_predictions, \
+            _, diffusion_targets, diffusion_predictions, \
+            duration_predictions, f0_predictions, ce_rvq_targets, ce_rvq_logits, \
             attention_softs, attention_hards, attention_logprobs, durations, _, _ = self.model(
                 tokens= tokens,
                 token_lengths= token_lengths,
@@ -244,6 +235,11 @@ class Trainer:
                     f0_predictions.float(),
                     f0s
                     ) * latent_masks).sum() / latent_masks.sum()
+                loss_dict['CE_RVQ'] = self.criterion_dict['CE'](
+                    ce_rvq_logits,
+                    ce_rvq_targets
+                    ).mean()
+                
                 loss_dict['Attention_Binarization'] = self.criterion_dict['Attention_Binarization'](attention_hards, attention_softs)
                 loss_dict['Attention_CTC'] = self.criterion_dict['Attention_CTC'](attention_logprobs, token_lengths, latent_lengths)
 
@@ -333,7 +329,8 @@ class Trainer:
         attention_priors = attention_priors.to(self.device, non_blocking=True)
 
         with torch.cuda.amp.autocast(enabled= self.hp.Use_Mixed_Precision):
-            _, diffusion_targets, diffusion_predictions, duration_predictions, f0_predictions, \
+            _, diffusion_targets, diffusion_predictions, \
+            duration_predictions, f0_predictions, ce_rvq_targets, ce_rvq_logits, \
             attention_softs, attention_hards, attention_logprobs, durations, _, _ = self.model(
                 tokens= tokens,
                 token_lengths= token_lengths,
@@ -368,6 +365,10 @@ class Trainer:
                     f0_predictions.float(),
                     f0s
                     ) * latent_masks).sum() / latent_masks.sum()
+                loss_dict['CE_RVQ'] = self.criterion_dict['CE'](
+                    ce_rvq_logits,
+                    ce_rvq_targets
+                    ).mean()
                 loss_dict['Attention_Binarization'] = self.criterion_dict['Attention_Binarization'](attention_hards, attention_softs)
                 loss_dict['Attention_CTC'] = self.criterion_dict['Attention_CTC'](attention_logprobs, token_lengths, latent_lengths)
 
@@ -416,8 +417,7 @@ class Trainer:
                     speech_prompts= speech_prompts[index].unsqueeze(0).to(self.device),
                     ddim_steps= max(self.hp.Diffusion.Max_Step // 10, 100)
                     )
-                decompressed_taget_latent = (latents[index] + 1.0) / 2.0 * (self.latent_max - self.latent_min) + self.latent_min
-                target_audios = self.model.encodec.decoder(decompressed_taget_latent.unsqueeze(0).to(self.device)).squeeze(1)
+                target_audios = self.model.encodec.decode([[latents.to(self.device), None]]).squeeze(1)
             
             token_length = token_lengths[index].item()
             target_latent_length = latent_lengths[index].item()
@@ -718,7 +718,7 @@ if __name__ == '__main__':
     argParser.add_argument('-s', '--steps', default= 0, type= int)
     argParser.add_argument('-r', '--local-rank', default= 0, type= int)
     args = argParser.parse_args()
-    
+
     hp = Recursive_Parse(yaml.load(
         open(args.hyper_parameters, encoding='utf-8'),
         Loader=yaml.Loader

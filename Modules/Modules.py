@@ -3,6 +3,8 @@ import torch
 import math
 from typing import Optional, Union
 from encodec import EncodecModel
+from einops import rearrange
+from random import sample
 
 from .Nvidia_Alignment_Learning_Framework import Alignment_Learning_Framework
 from .Diffusion import Diffusion
@@ -14,13 +16,9 @@ class NaturalSpeech2(torch.nn.Module):
     def __init__(
         self,
         hyper_parameters: Namespace,
-        latent_min: float,
-        latent_max: float,
         ):
         super().__init__()
         self.hp = hyper_parameters
-        self.latent_min= latent_min
-        self.latent_max= latent_max
 
         self.encoder = Phoneme_Encoder(self.hp)
         self.speech_prompter = Speech_Prompter(self.hp)
@@ -40,13 +38,18 @@ class NaturalSpeech2(torch.nn.Module):
         
         self.segment = Segment()
 
+        self.ce_rvq = CE_RVQ(
+            encodec= self.encodec,
+            rvq_sample= self.hp.Diffusion.Num_CERVQ_Sample
+            )
+
     def forward(
         self,
         tokens: torch.LongTensor,
         token_lengths: torch.LongTensor,
-        speech_prompts: torch.FloatTensor,
-        speech_prompts_for_diffusion: Optional[torch.FloatTensor]= None,
-        latents: Optional[torch.FloatTensor]= None,
+        speech_prompts: torch.LongTensor,
+        speech_prompts_for_diffusion: Optional[torch.LongTensor]= None,
+        latents: Optional[torch.LongTensor]= None,
         latent_lengths: Optional[torch.LongTensor]= None,
         f0s: Optional[torch.FloatTensor]= None,
         mels: Optional[torch.FloatTensor]= None,
@@ -84,14 +87,20 @@ class NaturalSpeech2(torch.nn.Module):
         self,
         tokens: torch.LongTensor,
         token_lengths: torch.LongTensor,
-        speech_prompts: torch.FloatTensor,
-        speech_prompts_for_diffusion: torch.FloatTensor,
-        latents: torch.FloatTensor,
+        speech_prompts: torch.LongTensor,
+        speech_prompts_for_diffusion: torch.LongTensor,
+        latents: torch.LongTensor,
         latent_lengths: torch.LongTensor,
         f0s: torch.FloatTensor,
         mels: torch.Tensor,
         attention_priors: torch.Tensor,
         ):
+        latent_codes = latents
+        with torch.no_grad():
+            latents = self.encodec.quantizer.decode(latents.permute(1, 0, 2))
+            speech_prompts = self.encodec.quantizer.decode(speech_prompts.permute(1, 0, 2))
+            speech_prompts_for_diffusion = self.encodec.quantizer.decode(speech_prompts_for_diffusion.permute(1, 0, 2))
+
         encodings = self.encoder(
             tokens= tokens,
             lengths= token_lengths
@@ -124,6 +133,13 @@ class NaturalSpeech2(torch.nn.Module):
             )        
         encodings_expand_slice = encodings_expand_slice.permute(0, 2, 1)
         
+        latent_codes_slice, _ = self.segment(
+            patterns= latent_codes.permute(0, 2, 1),
+            segment_size= self.hp.Train.Segment_Size,
+            offsets= offsets
+            )
+        latent_codes_slice = latent_codes_slice.permute(0, 2, 1)
+
         latents_slice, _ = self.segment(
             patterns= latents.permute(0, 2, 1),
             segment_size= self.hp.Train.Segment_Size,
@@ -131,24 +147,32 @@ class NaturalSpeech2(torch.nn.Module):
             )
         latents_slice = latents_slice.permute(0, 2, 1)
 
-        _, diffusion_targets, diffusion_predictions = self.diffusion(
+        _, diffusion_targets, diffusion_predictions, diffusion_starts = self.diffusion(
             encodings= encodings_expand_slice,
             lengths= torch.full_like(latent_lengths, fill_value= self.hp.Train.Segment_Size),
             speech_prompts= speech_prompts_for_diffusion,
             latents= latents_slice
             )
+        
+        ce_rvq_logits, ce_rvq_targets = self.ce_rvq(
+            diffusion_starts= diffusion_starts,
+            target_latent_codes= latent_codes_slice
+            )
 
         return \
-            None, diffusion_targets, diffusion_predictions, duration_predictions, f0_predictions, \
+            None, diffusion_targets, diffusion_predictions, \
+            duration_predictions, f0_predictions, ce_rvq_targets, ce_rvq_logits, \
             attention_softs, attention_hards, attention_logprobs, durations, None, None
 
     def Inference(
         self,
         tokens: torch.LongTensor,
         token_lengths: torch.LongTensor,
-        speech_prompts: torch.FloatTensor,
+        speech_prompts: torch.LongTensor,
         ddim_steps: Optional[int]= None
         ):
+        speech_prompts = self.encodec.quantizer.decode(speech_prompts.permute(1, 0, 2))
+        
         encodings = self.encoder(
             tokens= tokens,
             lengths= token_lengths
@@ -169,15 +193,13 @@ class NaturalSpeech2(torch.nn.Module):
                 ddim_steps= ddim_steps
                 )        
         else:
-            latents, _, _ = self.diffusion(
+            latents, _, _, _ = self.diffusion.DDPM(
                 encodings= encodings_expand,
                 lengths= latent_lengths,
                 speech_prompts= speech_prompts,
                 )
         
-        latents = (latents + 1.0) / 2.0 * (self.latent_max - self.latent_min) + self.latent_min
-
-        # Performing VQ to correct the predictions of incomplete diffusion.        
+        # Performing VQ to correct the incomplete predictions of diffusion.        
         latents = self.encodec.quantizer.encode(
             x= latents,
             sample_rate= self.encodec.frame_rate,
@@ -187,7 +209,8 @@ class NaturalSpeech2(torch.nn.Module):
         predictions = self.encodec.decoder(latents).squeeze(1)  # [Batch, Audio_t]
 
         return \
-            predictions, None, None, None, None, \
+            predictions, None, None, \
+            None, None, None, None, \
             None, None, None, durations, f0s, latent_lengths
 
 class Phoneme_Encoder(torch.nn.Module): 
@@ -574,7 +597,7 @@ class F0_Predictor(Variance_Predictor):
         self,
         hyper_parameters: Namespace,
         ):
-        self.hp = hyper_parameters        
+        self.hp = hyper_parameters
         super().__init__(
             channels= self.hp.Encoder.Size,
             stack= self.hp.Duration_Predictor.Stack,
@@ -615,3 +638,63 @@ def Mask_Generate(lengths: torch.Tensor, max_length: Optional[Union[int, torch.T
     max_length = max_length or torch.max(lengths)
     sequence = torch.arange(max_length)[None, :].to(lengths.device)
     return sequence >= lengths[:, None]    # [Batch, Time]
+
+
+class CE_RVQ(torch.nn.Module):
+    def __init__(
+        self,
+        encodec: EncodecModel,
+        rvq_sample: int= 4
+        ):
+        super().__init__()        
+        self.codebooks = torch.nn.ModuleList([
+            torch.nn.Embedding(
+            num_embeddings= 1024,
+            embedding_dim= 128,
+            _weight= vq_layer._codebook.embed,
+            _freeze= True
+            )
+            for vq_layer in encodec.quantizer.vq.layers
+            ])   # [Num_Codebook, Latent_d] * Num_VQ ([1024, 128] * 32)
+        
+        self.num_vq = encodec.quantizer.n_q
+        self.rvq_sample = rvq_sample
+
+    def forward(
+        self,
+        diffusion_starts: torch.FloatTensor,
+        target_latent_codes: torch.LongTensor
+        ):
+        '''
+        diffusion_starts: [Batch, Latent_d, Latent_t]
+        target_latent_codes: [Batch, Num_VQ, Latent_t]
+        '''
+        sample_rvq_indices = sample(range(self.num_vq), self.rvq_sample)
+
+        with torch.no_grad():
+            target_vq_latents = torch.stack([
+                codebook(latent_codes)  # [Batch, Latent_t, Latent_d]
+                for latent_codes, codebook in zip(target_latent_codes.permute(1, 0, 2)[1:], self.codebooks[1:])
+                ], dim= 0)  # [Num_VQ - 1, Batch, Latent_t, Latent_d]
+            target_vq_latents = rearrange(target_vq_latents, 'num_vq batch latent_t latent_d -> batch latent_d num_vq latent_t')
+            target_vq_latents = torch.cat([target_vq_latents, torch.zeros_like(target_vq_latents[:, :, :1])], dim= 2)
+            target_vq_latents = target_vq_latents.flip(dims= [2,]).cumsum(dim= 0).flip(dims= [2,])
+            target_vq_latents = target_vq_latents[:, :, sample_rvq_indices, :]        
+
+        # Num_VQ == (Diff_0 - RVQ1 - ... - RVQ31, ..., Diff_0 - RVQ31, Diff_0)
+        prediction_residual_vq_latents = rearrange(diffusion_starts, 'batch latent_d latent_t -> batch latent_d 1 latent_t').expand(-1, -1, self.rvq_sample, -1)
+        prediction_residual_vq_latents = rearrange(
+            prediction_residual_vq_latents - target_vq_latents.detach(),
+            'batch latent_d num_vq latent_t -> batch latent_d 1 num_vq latent_t'
+            )
+        
+        embeddings = rearrange(
+            torch.stack([self.codebooks[index].weight for index in sample_rvq_indices], dim= 0),
+            'num_vq num_codebook latent_d -> 1 latent_d num_codebook num_vq 1'
+            )
+        logits = (prediction_residual_vq_latents - embeddings).pow(2.0).mean(dim= 1) # [Batch, Num_Codebook, Num_VQ, Latent_t]
+
+        targets = target_latent_codes[:, sample_rvq_indices]
+        
+        return logits, targets
+

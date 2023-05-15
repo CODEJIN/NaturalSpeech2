@@ -105,7 +105,7 @@ def Pattern_Generate(
     audio = librosa.util.normalize(audio) * 0.95
     audio = audio[:audio.shape[0] - (audio.shape[0] % hop_size)]
 
-    latents = encodec.quantizer.decode(encodec.encode(torch.from_numpy(audio)[None, None])[0][0].permute(1, 0, 2)).squeeze(0).numpy()  # [128, Audio_t / 320]
+    latents = encodec.encode(torch.from_numpy(audio)[None, None])[0][0].squeeze(0).numpy()    # [32, Audio_t / 320]
 
     mel = mel_spectrogram(
         y= torch.from_numpy(audio).float().unsqueeze(0),
@@ -152,7 +152,7 @@ def Pattern_Generate(
     mel = mel[:, initial_silence_frame:last_silence_frame]
     f0 = f0[initial_silence_frame:last_silence_frame]
     
-    return audio.astype(np.float16), latents.astype(np.float16), mel.astype(np.float16), f0.astype(np.float16)
+    return audio.astype(np.float16), latents.astype(np.int16), mel.astype(np.float16), f0.astype(np.float16)
 
 def Pattern_File_Generate(path: str, speaker: str, emotion: str, language: str, gender: str, dataset: str, text: str, pronunciation: str, tag: str='', eval: bool= False):
     pattern_path = hp.Train.Eval_Pattern.Path if eval else hp.Train.Train_Pattern.Path
