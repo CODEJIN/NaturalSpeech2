@@ -1,4 +1,3 @@
-from email.policy import strict
 import os
 os.environ['FOR_DISABLE_CONSOLE_CTRL_HANDLER'] = 'T'    # This is ot prevent to be called Fortran Ctrl+C crash in Windows.
 import torch
@@ -460,7 +459,7 @@ class Trainer:
             prediction_f0 = prediction_f0s[0, :prediction_latent_length].cpu().numpy()
 
             target_duration = durations[index, :token_length].long()
-            target_duration = torch.arange(target_duration.size(0)).repeat_interleave(target_duration.cpu())[:prediction_latent_length].cpu().numpy()
+            target_duration = torch.arange(target_duration.size(0)).repeat_interleave(target_duration.cpu())[:target_latent_length].cpu().numpy()
 
             prediction_duration = prediction_durations[0, :token_length]
             prediction_duration = torch.arange(prediction_duration.size(0)).repeat_interleave(prediction_duration.cpu())[:prediction_latent_length].cpu().numpy()

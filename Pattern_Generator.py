@@ -736,8 +736,7 @@ def LJ_Info_Load(path: str):
 
 def MLS_Info_Load(path: str):
     paths, texts, speakers = [], [], []
-    # for partition in ['dev', 'test', 'train']:
-    for partition in ['dev', 'test']:
+    for partition in ['dev', 'test', 'train']:
         for line in open(os.path.join(path, partition, 'transcripts.txt').replace('\\', '/'), 'r', encoding= 'utf-8-sig').readlines():
             file_path, text = line.strip().split('\t')
             speaker, book_id, _ = file_path.strip().split('_')
