@@ -65,7 +65,7 @@ class Inferencer:
 
         logging.info('Checkpoint loaded at {} steps.'.format(self.steps))
 
-    @torch.no_grad()
+    @torch.inference_mode()
     def Inference_Step(
         self,
         tokens: torch.Tensor,
@@ -86,10 +86,10 @@ class Inferencer:
 
         lengths = [
             length * self.hp.Sound.Frame_Shift
-            for length in latent_lengths
+            for length in latent_lengths.cpu().numpy()
             ]
         
-        audios = [audio[:length] for audio, length in zip(audios, lengths)]
+        audios = [audio[:length] for audio, length in zip(audios.cpu().numpy(), lengths)]
         
         return audios
 

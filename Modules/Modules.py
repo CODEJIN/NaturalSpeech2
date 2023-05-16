@@ -193,7 +193,7 @@ class NaturalSpeech2(torch.nn.Module):
                 ddim_steps= ddim_steps
                 )        
         else:
-            latents, _, _, _ = self.diffusion.DDPM(
+            latents = self.diffusion.DDPM(
                 encodings= encodings_expand,
                 lengths= latent_lengths,
                 speech_prompts= speech_prompts,
