@@ -21,7 +21,6 @@ class LinearAttention(torch.nn.Module):
         self.query_scale = num_heads ** -0.5
         
         self.query = torch.nn.Sequential(
-            LayerNorm(num_features= query_channels),
             Conv1d(
                 in_channels= query_channels,
                 out_channels= calc_channels,
@@ -29,11 +28,9 @@ class LinearAttention(torch.nn.Module):
                 w_init_gain= 'linear'
                 ),
             LayerNorm(num_features= calc_channels),
-            torch.nn.ELU(),
-            Lambda(lambda x: x + 1.0)
+            Lambda(lambda x: torch.nn.functional.elu(x) + 1.0)
             )
         self.key = torch.nn.Sequential(
-            LayerNorm(num_features= key_channels),
             Conv1d(
                 in_channels= key_channels,
                 out_channels= calc_channels,
@@ -41,11 +38,9 @@ class LinearAttention(torch.nn.Module):
                 w_init_gain= 'linear'
                 ),
             LayerNorm(num_features= calc_channels),
-            torch.nn.ELU(),
-            Lambda(lambda x: x + 1.0)
+            Lambda(lambda x: torch.nn.functional.elu(x) + 1.0)
             )
         self.value = torch.nn.Sequential(
-            LayerNorm(num_features= value_channels),
             Conv1d(
                 in_channels= value_channels,
                 out_channels= calc_channels,
@@ -53,8 +48,7 @@ class LinearAttention(torch.nn.Module):
                 w_init_gain= 'linear'
                 ),
             LayerNorm(num_features= calc_channels),
-            torch.nn.ELU(),
-            Lambda(lambda x: x + 1.0)
+            Lambda(lambda x: torch.nn.functional.elu(x) + 1.0)
             )
         
         self.projection = Conv1d(
@@ -93,7 +87,6 @@ class LinearAttention(torch.nn.Module):
         
         if not key_padding_masks is None:
             keys.masked_fill_(key_padding_masks[:, None, None, :], -1e+4)
-            values.masked_fill_(key_padding_masks[:, None, None, :], -1e+4)
 
         queries = queries.softmax(dim= 2) * self.query_scale    # channel softmax
         keys = keys.softmax(dim= 3)    # time softmax

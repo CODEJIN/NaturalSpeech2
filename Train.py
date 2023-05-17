@@ -199,7 +199,7 @@ class Trainer:
 
         with torch.cuda.amp.autocast(enabled= self.hp.Use_Mixed_Precision):
             _, diffusion_targets, diffusion_predictions, \
-            duration_predictions, f0_predictions, ce_rvq_targets, ce_rvq_logits, \
+            duration_predictions, f0_predictions, ce_rvq_losses, \
             attention_softs, attention_hards, attention_logprobs, durations, _, _ = self.model(
                 tokens= tokens,
                 token_lengths= token_lengths,
@@ -234,11 +234,7 @@ class Trainer:
                     f0_predictions.float(),
                     f0s
                     ) * latent_masks).sum() / latent_masks.sum()
-                loss_dict['CE_RVQ'] = self.criterion_dict['CE'](
-                    ce_rvq_logits,
-                    ce_rvq_targets
-                    ).mean()
-                
+                loss_dict['CE_RVQ'] = ce_rvq_losses                
                 loss_dict['Attention_Binarization'] = self.criterion_dict['Attention_Binarization'](attention_hards, attention_softs)
                 loss_dict['Attention_CTC'] = self.criterion_dict['Attention_CTC'](attention_logprobs, token_lengths, latent_lengths)
 
@@ -247,6 +243,7 @@ class Trainer:
             loss_dict['Diffusion'] +
             loss_dict['Duration'] +
             loss_dict['F0'] +
+            loss_dict['CE_RVQ'] +
             loss_dict['Attention_Binarization'] +
             loss_dict['Attention_CTC']
             ).backward()
@@ -329,7 +326,7 @@ class Trainer:
 
         with torch.cuda.amp.autocast(enabled= self.hp.Use_Mixed_Precision):
             _, diffusion_targets, diffusion_predictions, \
-            duration_predictions, f0_predictions, ce_rvq_targets, ce_rvq_logits, \
+            duration_predictions, f0_predictions, ce_rvq_losses, \
             attention_softs, attention_hards, attention_logprobs, durations, _, _ = self.model(
                 tokens= tokens,
                 token_lengths= token_lengths,
@@ -364,10 +361,7 @@ class Trainer:
                     f0_predictions.float(),
                     f0s
                     ) * latent_masks).sum() / latent_masks.sum()
-                loss_dict['CE_RVQ'] = self.criterion_dict['CE'](
-                    ce_rvq_logits,
-                    ce_rvq_targets
-                    ).mean()
+                loss_dict['CE_RVQ'] = ce_rvq_losses
                 loss_dict['Attention_Binarization'] = self.criterion_dict['Attention_Binarization'](attention_hards, attention_softs)
                 loss_dict['Attention_CTC'] = self.criterion_dict['Attention_CTC'](attention_logprobs, token_lengths, latent_lengths)
 
@@ -377,6 +371,7 @@ class Trainer:
 
         return durations
 
+    @torch.no_grad()
     def Evaluation_Epoch(self):
         logging.info('(Steps: {}) Start evaluation in GPU {}.'.format(self.steps, self.gpu_id))
 
