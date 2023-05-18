@@ -652,23 +652,21 @@ def VCTK_Info_Load(path: str):
     return paths, text_dict, pronunciation_dict, speaker_dict, emotion_dict, language_dict, gender_dict
 
 def Libri_Info_Load(path: str):
-    gender_path = os.path.join(path, 'Gender.txt').replace('\\', '/')
-
     paths = []
     for root, _, files in os.walk(path):
         for file in files:
-            file = os.path.join(root, file).replace('\\', '/')
-            if not os.path.splitext(file)[1].upper() in using_extension:
+            file_path = os.path.join(root, file).replace('\\', '/')
+            if not os.path.splitext(file_path)[1].upper() in using_extension:
                 continue
-            paths.append(file)
+            paths.append(file_path)
 
     text_dict = {}
-    for path in paths:
-        text = Text_Filtering(unidecode(open('{}.normalized.txt'.format(os.path.splitext(path)[0]), 'r', encoding= 'utf-8-sig').readlines()[0]))
+    for file_path in paths:
+        text = Text_Filtering(unidecode(open('{}.normalized.txt'.format(os.path.splitext(file_path)[0]), 'r', encoding= 'utf-8-sig').readlines()[0]))
         if text is None:
             continue
         
-        text_dict[path] = text
+        text_dict[file_path] = text
 
     paths = list(text_dict.keys())
     pronunciations = Phonemize(
@@ -684,10 +682,11 @@ def Libri_Info_Load(path: str):
 
     emotion_dict = {path: 'Neutral' for path in paths}
     language_dict = {path: 'English' for path in paths}
-    gender_dict = {
-        'Libri.{:04d}'.format(int(line.strip().split('\t')[0])): line.strip().split('\t')[1]
-        for line in open(gender_path).readlines()[1:]
-        }
+
+    gender_dict = {}
+    for line in open(os.path.join(os.path.join(path, 'SPEAKERS.txt').replace('\\', '/')), 'r', encoding= 'utf-8-sig').readlines()[12:]:
+        speaker, gender, *_ = [x.strip() for x in line.strip().split('|')]
+        gender_dict[f'Libri.{int(speaker):04d}'] = 'Male' if gender == 'M' else 'Female'
     gender_dict = {
         path: gender_dict[speaker]
         for path, speaker in speaker_dict.items()
@@ -1151,3 +1150,4 @@ if __name__ == '__main__':
 # python Pattern_Generator.py -hp Hyper_Parameters.yaml -lj D:\Rawdata\LJSpeech
 # python Pattern_Generator.py -hp Hyper_Parameters.yaml -vctk D:\Rawdata\VCTK092
 # python Pattern_Generator.py -hp Hyper_Parameters.yaml -mls D:\Rawdata\mls_english_opus
+# python Pattern_Generator.py -hp Hyper_Parameters.yaml -libri D:\Rawdata\LibriTTS
