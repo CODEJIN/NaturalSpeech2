@@ -329,6 +329,14 @@ class Denoiser(torch.nn.Module):
         x = self.postnet(x) * masks
 
         return x
+    
+    def remove_weight_norm(self):
+        for wavenet in self.wavenets:
+            torch.nn.utils.remove_weight_norm(wavenet.conv)
+            torch.nn.utils.remove_weight_norm(wavenet.condition)
+            torch.nn.utils.remove_weight_norm(wavenet.diffusion_step)
+            
+
 
 
 class Diffusion_Embedding(torch.nn.Module):
