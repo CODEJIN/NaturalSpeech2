@@ -210,7 +210,7 @@ class Denoiser(torch.nn.Module):
                 kernel_size= 1,
                 w_init_gain= 'relu'
                 ),
-            torch.nn.ReLU()
+            torch.nn.SiLU()
             )
 
         self.encoding_ffn = torch.nn.Sequential(
@@ -220,7 +220,7 @@ class Denoiser(torch.nn.Module):
                 kernel_size= 1,
                 w_init_gain= 'relu'
                 ),
-            torch.nn.ReLU(),
+            torch.nn.SiLU(),
             Conv1d(
                 in_channels= self.hp.Encoder.Size * 4,
                 out_channels= self.hp.Diffusion.Size,
@@ -239,7 +239,7 @@ class Denoiser(torch.nn.Module):
                 kernel_size= 1,
                 w_init_gain= 'relu'
                 ),
-            torch.nn.ReLU(),
+            torch.nn.SiLU(),
             Conv1d(
                 in_channels= self.hp.Diffusion.Size * 4,
                 out_channels= self.hp.Diffusion.Size,
@@ -279,7 +279,7 @@ class Denoiser(torch.nn.Module):
             ])
 
         self.postnet = torch.nn.Sequential(
-            torch.nn.ReLU(),
+            torch.nn.SiLU(),
             Conv1d(
                 in_channels= self.hp.Diffusion.Size,
                 out_channels= self.hp.Audio_Codec.Size,
@@ -329,14 +329,6 @@ class Denoiser(torch.nn.Module):
         x = self.postnet(x) * masks
 
         return x
-    
-    def remove_weight_norm(self):
-        for wavenet in self.wavenets:
-            torch.nn.utils.remove_weight_norm(wavenet.conv)
-            torch.nn.utils.remove_weight_norm(wavenet.condition)
-            torch.nn.utils.remove_weight_norm(wavenet.diffusion_step)
-            
-
 
 
 class Diffusion_Embedding(torch.nn.Module):
@@ -372,35 +364,27 @@ class WaveNet(torch.nn.Module):
         self.calc_channels = channels
         self.apply_film = apply_film
 
-        def weight_norm_initialize_weight(module):
-            if 'Conv' in module.__class__.__name__:
-                module.weight.data.normal_(0.0, 0.01)        
-
-        self.conv = torch.nn.utils.weight_norm(Conv1d(
+        self.conv = Conv1d(
             in_channels= channels,
             out_channels= channels * 2,
             kernel_size= kernel_size,
             dilation= dilation,
             padding= (kernel_size - 1) * dilation // 2
-            ))
+            )
         
         self.dropout = torch.nn.Dropout(p= wavenet_dropout_rate)
 
-        self.condition = torch.nn.utils.weight_norm(Conv1d(
+        self.condition = Conv1d(
             in_channels= condition_channels,
             out_channels= channels * 2,
             kernel_size= 1
-            ))
-        self.diffusion_step = torch.nn.utils.weight_norm(Conv1d(
+            )
+        self.diffusion_step = Conv1d(
             in_channels= diffusion_step_channels,
             out_channels= channels,
             kernel_size= 1
-            ))
+            )
         
-        self.conv.apply(weight_norm_initialize_weight)
-        self.condition.apply(weight_norm_initialize_weight)
-        self.diffusion_step.apply(weight_norm_initialize_weight)
-
         if apply_film:
             self.attention = LinearAttention(
                 query_channels= channels,

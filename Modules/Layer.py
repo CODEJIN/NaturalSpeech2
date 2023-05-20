@@ -155,7 +155,27 @@ class LayerNorm(torch.nn.Module):
         shape = [1, -1] + [1] * (x.ndim - 2)
 
         return x * self.gamma.view(*shape) + self.beta.view(*shape)
-      
+
+class RMSNorm(torch.nn.Module):
+    def __init__(self, num_features: int, eps: float = 1e-6):
+        super().__init__()
+        self.eps = eps
+        self.scale = torch.nn.Parameter(torch.ones(num_features))
+
+    def _norm(self, x):
+        return x * (x.pow(2.0).mean(dim= 1, keepdim=True) + self.eps).rsqrt()
+
+    def forward(self, x: torch.Tensor):
+        '''
+        x: [Batch, Dim, Time]
+        '''
+        output = self._norm(x.float()).to(x.dtype)
+
+        shape = [1, -1] + [1] * (x.ndim - 2)
+
+        return output * self.scale.view(*shape)
+
+
 class LightweightConv1d(torch.nn.Module):
     '''
     Args:

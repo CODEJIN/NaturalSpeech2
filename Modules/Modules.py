@@ -9,7 +9,7 @@ from random import sample
 from .Nvidia_Alignment_Learning_Framework import Alignment_Learning_Framework
 from .Diffusion import Diffusion
 from .LinearAttention import LinearAttention
-from .Layer import Conv1d, LayerNorm
+from .Layer import Conv1d, RMSNorm
 
 
 class NaturalSpeech2(torch.nn.Module):
@@ -320,8 +320,8 @@ class FFN(torch.nn.Module):
             padding= (kernel_size - 1) // 2,
             w_init_gain= 'relu'
             )
-        self.relu = torch.nn.ReLU()
-        self.norm_0 = LayerNorm(
+        self.silu = torch.nn.SiLU()
+        self.norm_0 = RMSNorm(
             num_features= channels * 4,
             )
         self.dropout = torch.nn.Dropout(p= dropout_rate)
@@ -332,7 +332,7 @@ class FFN(torch.nn.Module):
             padding= (kernel_size - 1) // 2,
             w_init_gain= 'linear'
             )
-        self.norm_1 = LayerNorm(
+        self.norm_1 = RMSNorm(
             num_features= channels,
             )
         
@@ -347,7 +347,7 @@ class FFN(torch.nn.Module):
         residuals = x
 
         x = self.conv_0(x * masks)
-        x = self.relu(x)
+        x = self.silu(x)
         x = self.norm_0(x)
         x = self.dropout(x)
         x = self.conv_1(x * masks)
@@ -372,8 +372,8 @@ class Speech_Prompter(torch.nn.Module):
                 kernel_size= 1,
                 w_init_gain= 'relu'
                 ),
-            LayerNorm(num_features= self.hp.Speech_Prompter.Size),
-            torch.nn.ReLU()
+            RMSNorm(num_features= self.hp.Speech_Prompter.Size),
+            torch.nn.SiLU()
             )
         
         self.blocks = torch.nn.ModuleList([
@@ -511,8 +511,8 @@ class Variance_Predictor(torch.nn.Module):
                     padding= (conv_kernel_size - 1) // 2,
                     w_init_gain= 'relu'
                     ))
-                conv.append(LayerNorm(num_features= channels))
-                conv.append(torch.nn.ReLU())
+                conv.append(RMSNorm(num_features= channels))
+                conv.append(torch.nn.SiLU())
                 conv.append(torch.nn.Dropout(p= conv_dropout_rate))
                 conv_block.append(conv)
             self.conv_blocks.append(conv_block)
@@ -595,7 +595,7 @@ class Duration_Predictor(Variance_Predictor):
             speech_prompts= speech_prompts
             )
         return torch.nn.functional.softplus(durations)
-        
+
 class F0_Predictor(Variance_Predictor):
     def __init__(
         self,

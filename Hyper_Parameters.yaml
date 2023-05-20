@@ -102,11 +102,11 @@ Train:
     Batch_Size: 8
     Segment_Size: 64
     Learning_Rate:
-        Initial: 5.0e-4
+        Initial: 1.0e-4
         Warmup_Step: 32000
     ADAM:
-        Beta1: 0.8
-        Beta2: 0.99
+        Beta1: 0.9
+        Beta2: 0.999
         Epsilon: 1.0e-9
     Gradient_Norm: 0.0
     Max_Step: 1000000
@@ -133,16 +133,16 @@ Train:
 
 Inference_Batch_Size: 16
 
-Inference_Path: './results/LJ_230517/Inference'
-Checkpoint_Path: './results/LJ_230517/Checkpoint'
-Log_Path: './results/LJ_230517/Log'
+Inference_Path: './results/LJ_230519_LR0001/Inference'
+Checkpoint_Path: './results/LJ_230519_LR0001/Checkpoint'
+Log_Path: './results/LJ_230519_LR0001/Log'
 
 Weights_and_Biases:
-    # Use: true
-    Use: false
+    Use: true
+    # Use: false
     Project: 'NaturalSpeech2'
     Entity: 'codejin'
-    Name: 'LJ_230517'
+    Name: 'LJ_230519_LR0001'
     Save_Checkpoint:
         Use: false
         Interval: 50000 # Unlike local, The capacity of WandB is small.
