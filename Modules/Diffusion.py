@@ -75,8 +75,6 @@ class Diffusion(torch.nn.Module):
             )
         
         diffusion_targets = noises * alphas[:, None, None] - latents * sigmas[:, None, None]
-
-
         diffusion_starts = latents * alphas[:, None, None] - diffusion_predictions * sigmas[:, None, None]
         
         return diffusion_targets, diffusion_predictions, diffusion_starts

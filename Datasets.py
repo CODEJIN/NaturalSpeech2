@@ -62,6 +62,7 @@ class Dataset(torch.utils.data.Dataset):
         self,
         token_dict: Dict[str, int],
         f0_info_dict: Dict[str, Dict[str, float]],
+        use_between_padding: bool,
         pattern_path: str,
         metadata_file: str,
         latent_length_min: int,
@@ -75,6 +76,7 @@ class Dataset(torch.utils.data.Dataset):
         super().__init__()
         self.token_dict = token_dict
         self.f0_info_dict = f0_info_dict
+        self.use_between_padding = use_between_padding
         self.pattern_path = pattern_path
 
         self.attention_prior_generator = Attention_Prior_Generator()
@@ -123,9 +125,12 @@ class Dataset(torch.utils.data.Dataset):
         pattern_dict = pickle.load(open(path, 'rb'))
         speaker = pattern_dict['Speaker']
         
-        # padding between tokens
-        token = ['<P>'] * (len(pattern_dict['Pronunciation']) * 2 - 1)
-        token[0::2] = pattern_dict['Pronunciation']
+        if self.use_between_padding:
+            # padding between tokens
+            token = ['<P>'] * (len(pattern_dict['Pronunciation']) * 2 - 1)
+            token[0::2] = pattern_dict['Pronunciation']
+        else:
+            token = pattern_dict['Pronunciation']
         token = Text_to_Token(token, self.token_dict)
 
         f0 = pattern_dict['F0']
@@ -143,6 +148,7 @@ class Inference_Dataset(torch.utils.data.Dataset):
         token_dict: Dict[str, int],
         sample_rate: int,
         hop_size: int,
+        use_between_padding: bool,
         texts: List[str],
         references: List[str]
         ):
@@ -150,6 +156,7 @@ class Inference_Dataset(torch.utils.data.Dataset):
         self.token_dict = token_dict
         self.sample_rate = sample_rate
         self.hop_size = hop_size
+        self.use_between_padding = use_between_padding
         self.encodec = EncodecModel.encodec_model_24khz()
 
         pronunciations = Phonemize(texts, language= 'English')
@@ -168,9 +175,12 @@ class Inference_Dataset(torch.utils.data.Dataset):
     def __getitem__(self, idx):
         text, pronunciation, reference = self.patterns[idx]
 
-        token = ['<P>'] * (len(pronunciation) * 2 - 1)
-        token[0::2] = pronunciation
-        pronunciation = [(x if x != '<P>' else '') for x in token]
+        if self.use_between_padding:
+            token = ['<P>'] * (len(pronunciation) * 2 - 1)
+            token[0::2] = pronunciation
+            pronunciation = [(x if x != '<P>' else '') for x in token]
+        else:
+            token = pronunciation
         token = Text_to_Token(token, self.token_dict)
 
         audio, _ = librosa.load(reference, sr= self.sample_rate)

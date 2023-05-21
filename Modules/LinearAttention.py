@@ -51,14 +51,25 @@ class LinearAttention(torch.nn.Module):
             Lambda(lambda x: torch.nn.functional.elu(x) + 1.0)
             )
         
-        self.projection = Conv1d(
-            in_channels= calc_channels,
-            out_channels= query_channels,
-            kernel_size= 1,
-            w_init_gain= 'linear'
-            )
+        # self.projection = Conv1d(
+        #     in_channels= calc_channels,
+        #     out_channels= query_channels,
+        #     kernel_size= 1,
+        #     w_init_gain= 'linear'
+        #     )
         
-        self.norm = RMSNorm(num_features= query_channels)
+        # self.norm = RMSNorm(num_features= query_channels)
+        self.projection = torch.nn.Sequential(
+            Conv1d(
+                in_channels= calc_channels,
+                out_channels= query_channels,
+                kernel_size= 1,
+                w_init_gain= 'linear'
+                ),
+            RMSNorm(num_features= query_channels),
+            torch.nn.SiLU()
+            )
+
 
     def forward(
         self,
@@ -95,7 +106,8 @@ class LinearAttention(torch.nn.Module):
         contexts = einsum(keys, values, 'batch head key_d time, batch head value_d time -> batch head key_d value_d')
         contexts = einsum(queries, contexts, 'batch head query_d time, batch head query_d value_d -> batch head value_d time')
         contexts = rearrange(contexts, 'batch head dimension time -> batch (head dimension) time')
-        contexts = self.projection(contexts)    # [Batch, Enc_d, Enc_t]
-        contexts = self.norm(contexts + residuals)
+        # contexts = self.projection(contexts)    # [Batch, Enc_d, Enc_t]
+        # contexts = self.norm(contexts) + residuals
+        contexts = self.projection(contexts) + residuals    # [Batch, Enc_d, Enc_t]
 
         return contexts

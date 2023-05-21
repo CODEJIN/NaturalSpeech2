@@ -36,6 +36,7 @@ Duration_Predictor:
         Kernel_Size: 3
         Stack: 3
         Dropout_Rate: 0.2
+    Use_Between_Padding: False
 
 F0_Predictor:
     Stack: 10
@@ -77,7 +78,8 @@ Language_Info_Path: 'D:/Datasets/22K.NaturalSpeech2.LJ/Language_Info.yaml'
 Gender_Info_Path: 'D:/Datasets/22K.NaturalSpeech2.LJ/Gender_Info.yaml'
 Language_and_Gender_Info_by_Speaker_Path: 'D:/Datasets/22K.NaturalSpeech2.LJ/Language_and_Gender_Info_by_Speaker.yaml'
 Train:
-    Pattern_Cache: false
+    Pattern_Cache: true
+    # Pattern_Cache: false
     Train_Pattern:
         Path: 'D:/Datasets/22K.NaturalSpeech2.LJ/Train'
         Metadata_File: 'METADATA.PICKLE'
@@ -102,7 +104,7 @@ Train:
     Batch_Size: 8
     Segment_Size: 64
     Learning_Rate:
-        Initial: 1.0e-4
+        Initial: 5.0e-4
         Warmup_Step: 32000
     ADAM:
         Beta1: 0.9
@@ -133,16 +135,16 @@ Train:
 
 Inference_Batch_Size: 16
 
-Inference_Path: './results/LJ_230519_LR0001/Inference'
-Checkpoint_Path: './results/LJ_230519_LR0001/Checkpoint'
-Log_Path: './results/LJ_230519_LR0001/Log'
+Inference_Path: './results/LJ_230520/Inference'
+Checkpoint_Path: './results/LJ_230520/Checkpoint'
+Log_Path: './results/LJ_230520/Log'
 
 Weights_and_Biases:
     Use: true
     # Use: false
     Project: 'NaturalSpeech2'
     Entity: 'codejin'
-    Name: 'LJ_230519_LR0001'
+    Name: 'LJ_230520'
     Save_Checkpoint:
         Use: false
         Interval: 50000 # Unlike local, The capacity of WandB is small.

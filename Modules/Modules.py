@@ -491,6 +491,7 @@ class Variance_Predictor(torch.nn.Module):
     def __init__(
         self,
         channels: int,
+        condition_channels: int,
         stack: int,
         attention_num_head: int,        
         conv_kernel_size: int,
@@ -520,10 +521,10 @@ class Variance_Predictor(torch.nn.Module):
         self.attentions = torch.nn.ModuleList([
             LinearAttention(
                 query_channels= channels,
-                key_channels= channels, 
-                value_channels= channels,
+                key_channels= condition_channels, 
+                value_channels= condition_channels,
                 calc_channels= channels,
-                num_heads= attention_num_head
+                num_heads= attention_num_head,
                 )
             for index in range(stack)
             ])
@@ -540,7 +541,7 @@ class Variance_Predictor(torch.nn.Module):
         self,
         encodings: torch.Tensor,
         lengths: torch.Tensor,
-        speech_prompts: torch.Tensor
+        speech_prompts: torch.Tensor,
         ) -> torch.Tensor:
         '''
         encodings: [Batch, Enc_d, Enc_t or Feature_t]
@@ -572,6 +573,7 @@ class Duration_Predictor(Variance_Predictor):
         self.hp = hyper_parameters        
         super().__init__(
             channels= self.hp.Encoder.Size,
+            condition_channels= self.hp.Speech_Prompter.Size,
             stack= self.hp.Duration_Predictor.Stack,
             attention_num_head= self.hp.Duration_Predictor.Attention.Head,
             conv_kernel_size= self.hp.Duration_Predictor.Conv.Kernel_Size,
@@ -604,6 +606,7 @@ class F0_Predictor(Variance_Predictor):
         self.hp = hyper_parameters
         super().__init__(
             channels= self.hp.Encoder.Size,
+            condition_channels= self.hp.Speech_Prompter.Size,
             stack= self.hp.Duration_Predictor.Stack,
             attention_num_head= self.hp.Duration_Predictor.Attention.Head,
             conv_kernel_size= self.hp.Duration_Predictor.Conv.Kernel_Size,
@@ -680,5 +683,11 @@ class CE_RVQ(torch.nn.Module):
                 codebooks = rearrange(layer._codebook.embed, 'num_codebook latent_d -> 1 num_codebook 1 latent_d')
                 logits = -(x - codebooks.detach()).pow(2.0).mean(dim= 3) # [Batch, Num_Codebook, Latent_t]
                 loss_list.append(torch.nn.functional.cross_entropy(logits, latent_codes, reduction='mean'))
+                
+                # loss_list.append(torch.nn.functional.mse_loss(
+                #     x,
+                #     layer._codebook.embed[latent_codes].detach(),
+                #     reduction= 'mean'
+                #     ))
 
         return torch.stack(loss_list).mean()
