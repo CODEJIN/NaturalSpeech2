@@ -128,8 +128,9 @@ class Dataset(torch.utils.data.Dataset):
         token[0::2] = pattern_dict['Pronunciation']
         token = Text_to_Token(token, self.token_dict)
 
-        f0 = pattern_dict['F0']        
+        f0 = pattern_dict['F0']
         f0 = np.where(f0 != 0.0, (f0 - self.f0_info_dict[speaker]['Mean']) / self.f0_info_dict[speaker]['Std'], 0.0)
+        f0 = np.clip(f0, -3.0, 3.0)
 
         return token, pattern_dict['Latent'], f0, pattern_dict['Mel']
 
