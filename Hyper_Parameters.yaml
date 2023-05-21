@@ -36,7 +36,7 @@ Duration_Predictor:
         Kernel_Size: 3
         Stack: 3
         Dropout_Rate: 0.2
-    Use_Between_Padding: False
+    Use_Between_Padding: true
 
 F0_Predictor:
     Stack: 10
