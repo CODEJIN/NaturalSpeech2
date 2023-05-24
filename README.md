@@ -20,7 +20,8 @@ Shen, K., Ju, Z., Tan, X., Liu, Y., Leng, Y., He, L., ... & Bian, J. (2023). Nat
         * I would greatly appreciate any advice or suggestions you may have regarding this matter.
     * The CE-RVQ loss is selectively applied to a random subset of RVQ layers at each step.
         * Since CE-RVQ consumes a significant amount of memory, I applied sampling to reduce memory usage.
-        * If you want to apply it to the entire RVQ layers, please modify the hyperparameter `hp.Diffusion.Num_CERVQ_Sample`.
+        * If you want to apply it to the entire RVQ layers, please modify the hyperparameter `hp.Diffusion.CERVQ.Num_Sample`.
+        * Based on the suggestion from @Autonomof, I have added a functionality to increase the weight of the initial layers during the sampling of the CE-RVQ layers. If you set `hp.Diffusion.CERVQ.Use_Weighted_Sample == true`, the weights will be taken into account.
 * The audio codec has been changed to Meta's `Encodec 24Khz`.
     * This is done to reduce the time spent training a separate audio codec.
     * The model uses 16Khz audio, but no audio resampling is applied.

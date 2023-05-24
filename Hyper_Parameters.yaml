@@ -63,7 +63,9 @@ Diffusion:
         Attention:
             Apply_in_Stack: 3
             Head: 8
-    Num_CERVQ_Sample: 4 # max: 32
+    CERVQ:
+        Num_Sample: 32 # max: 32
+        Use_Weighted_Sample: true
 
 Audio_Codec:
     Size: 128
@@ -85,7 +87,7 @@ Train:
         Metadata_File: 'METADATA.PICKLE'
         Feature_Length:
             Min: 100
-            Max: 1200
+            Max: 650
         Text_Length:
             Min: 1
             Max: 200
@@ -96,12 +98,12 @@ Train:
         Metadata_File: 'METADATA.PICKLE'
         Feature_Length:
             Min: 100
-            Max: 1200
+            Max: 650
         Text_Length:
             Min: 10
             Max: 200
     Num_Workers: 0
-    Batch_Size: 8
+    Batch_Size: 4
     Segment_Size: 64
     Learning_Rate:
         Initial: 5.0e-4
@@ -110,6 +112,7 @@ Train:
         Beta1: 0.9
         Beta2: 0.999
         Epsilon: 1.0e-9
+    Accumulated_Gradient_Step: 25
     Gradient_Norm: 0.0
     Max_Step: 1000000
     Checkpoint_Save_Interval: 5000
@@ -135,16 +138,16 @@ Train:
 
 Inference_Batch_Size: 16
 
-Inference_Path: './results/LJ_230520/Inference'
-Checkpoint_Path: './results/LJ_230520/Checkpoint'
-Log_Path: './results/LJ_230520/Log'
+Inference_Path: './results/LJ_230524/Inference'
+Checkpoint_Path: './results/LJ_230524/Checkpoint'
+Log_Path: './results/LJ_230524/Log'
 
 Weights_and_Biases:
-    Use: true
-    # Use: false
+    # Use: true
+    Use: false
     Project: 'NaturalSpeech2'
     Entity: 'codejin'
-    Name: 'LJ_230520'
+    Name: 'LJ_230524'
     Save_Checkpoint:
         Use: false
         Interval: 50000 # Unlike local, The capacity of WandB is small.

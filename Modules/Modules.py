@@ -1,5 +1,6 @@
 from argparse import Namespace
 import torch
+import numpy as np
 import math
 from typing import Optional, Union
 from encodec import EncodecModel
@@ -40,7 +41,8 @@ class NaturalSpeech2(torch.nn.Module):
 
         self.ce_rvq = CE_RVQ(
             encodec= self.encodec,
-            rvq_sample= self.hp.Diffusion.Num_CERVQ_Sample
+            rvq_sample= self.hp.Diffusion.CERVQ.Num_Sample,
+            use_weighted_sample= self.hp.Diffusion.CERVQ.Use_Weighted_Sample
             )
 
     def forward(
@@ -650,12 +652,14 @@ class CE_RVQ(torch.nn.Module):
     def __init__(
         self,
         encodec: EncodecModel,
-        rvq_sample: int= 4
+        rvq_sample: int= 4,
+        use_weighted_sample: bool= True
         ):
         super().__init__()
         self.encodec = encodec
         self.num_vq = encodec.quantizer.n_q
         self.rvq_sample = rvq_sample
+        self.use_weighted_sample = use_weighted_sample
 
     def forward(
         self,
@@ -666,8 +670,16 @@ class CE_RVQ(torch.nn.Module):
         diffusion_starts: [Batch, Latent_d, Latent_t]
         target_latent_codes: [Batch, Num_VQ, Latent_t]
         '''
-        sample_rvq_indices = sample(range(self.num_vq), self.rvq_sample)
-
+        if self.use_weighted_sample:
+            sample_rvq_indices = sorted(np.random.choice(
+                range(self.num_vq),
+                p= np.arange(self.num_vq, 0, -1) / sum(range(1, self.num_vq + 1)),
+                size= self.rvq_sample,
+                replace= False,
+                ))
+        else:
+            sample_rvq_indices = sample(range(self.num_vq), self.rvq_sample)
+        
         residuals = diffusion_starts
         loss_list = []
         for vq_index, (layer, latent_codes) in enumerate(zip(self.encodec.quantizer.vq.layers, target_latent_codes.permute(1, 0, 2))):

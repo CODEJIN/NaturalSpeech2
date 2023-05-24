@@ -241,7 +241,6 @@ class Trainer:
                 loss_dict['Attention_Binarization'] = self.criterion_dict['Attention_Binarization'](attention_hards, attention_softs)
                 loss_dict['Attention_CTC'] = self.criterion_dict['Attention_CTC'](attention_logprobs, token_lengths, latent_lengths)
 
-        self.optimizer.zero_grad()
         self.scaler.scale(
             loss_dict['Diffusion'] +
             loss_dict['Duration'] +
@@ -251,27 +250,31 @@ class Trainer:
             loss_dict['Attention_CTC']
             ).backward()
 
-        self.scaler.unscale_(self.optimizer)
+        if self.steps % self.hp.Train.Accumulated_Gradient_Step:
+            self.scaler.unscale_(self.optimizer)
 
-        if self.hp.Train.Gradient_Norm > 0.0:
-            torch.nn.utils.clip_grad_norm_(
-                parameters= self.model.parameters(),
-                max_norm= self.hp.Train.Gradient_Norm
-                )
-        
-        self.scaler.step(self.optimizer)
-        self.scaler.update()
+            if self.hp.Train.Gradient_Norm > 0.0:
+                torch.nn.utils.clip_grad_norm_(
+                    parameters= self.model.parameters(),
+                    max_norm= self.hp.Train.Gradient_Norm
+                    )
+            
+            self.scaler.step(self.optimizer)
+            self.scaler.update()
+
+            self.scheduler.step()
+
+            self.optimizer.zero_grad()
 
         self.steps += 1
         self.tqdm.update(1)
-        
-        self.scheduler.step()
 
         for tag, loss in loss_dict.items():
             loss = reduce_tensor(loss.data, self.num_gpus).item() if self.num_gpus > 1 else loss.item()
             self.scalar_dict['Train']['Loss/{}'.format(tag)] += loss
 
     def Train_Epoch(self):
+        self.optimizer.zero_grad()  # to accumulated gradient
         for tokens, token_lengths, speech_prompts, speech_prompts_for_diffusion, latents, latent_lengths, f0s, mels, attention_priors in self.dataloader_dict['Train']:
             self.Train_Step(
                 tokens= tokens,
