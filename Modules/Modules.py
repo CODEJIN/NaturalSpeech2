@@ -17,9 +17,13 @@ class NaturalSpeech2(torch.nn.Module):
     def __init__(
         self,
         hyper_parameters: Namespace,
+        latent_min: float,
+        latent_max: float,
         ):
         super().__init__()
         self.hp = hyper_parameters
+        self.latent_min = latent_min
+        self.latent_max = latent_max
 
         self.encoder = Phoneme_Encoder(self.hp)
         self.speech_prompter = Speech_Prompter(self.hp)
@@ -100,6 +104,7 @@ class NaturalSpeech2(torch.nn.Module):
         latent_codes = latents
         with torch.no_grad():
             latents = self.encodec.quantizer.decode(latents.permute(1, 0, 2))
+            latents = (latents - self.latent_min) / (self.latent_max - self.latent_min)
             speech_prompts = self.encodec.quantizer.decode(speech_prompts.permute(1, 0, 2))
             speech_prompts_for_diffusion = self.encodec.quantizer.decode(speech_prompts_for_diffusion.permute(1, 0, 2))
 
@@ -157,7 +162,7 @@ class NaturalSpeech2(torch.nn.Module):
             )
         
         ce_rvq_losses = self.ce_rvq(
-            diffusion_starts= diffusion_starts,
+            diffusion_starts= diffusion_starts * (self.latent_max - self.latent_min) + self.latent_min,
             target_latent_codes= latent_codes_slice
             )
 
@@ -171,7 +176,8 @@ class NaturalSpeech2(torch.nn.Module):
         tokens: torch.LongTensor,
         token_lengths: torch.LongTensor,
         speech_prompts: torch.LongTensor,
-        ddim_steps: Optional[int]= None
+        ddim_steps: Optional[int]= None,
+        temperature: float= 1.2 ** 2
         ):
         speech_prompts = self.encodec.quantizer.decode(speech_prompts.permute(1, 0, 2))
         
@@ -186,7 +192,9 @@ class NaturalSpeech2(torch.nn.Module):
             encoding_lengths= token_lengths,
             speech_prompts= speech_prompts,
             )
-        
+        encodings_expand = encodings_expand + torch.randn_like(encodings_expand) / temperature
+
+
         if not ddim_steps is None and ddim_steps < self.hp.Diffusion.Max_Step:
             latents = self.diffusion.DDIM(
                 encodings= encodings_expand,
@@ -200,8 +208,9 @@ class NaturalSpeech2(torch.nn.Module):
                 lengths= latent_lengths,
                 speech_prompts= speech_prompts,
                 )
+        latents = latents * (self.latent_max - self.latent_min) + self.latent_min
         
-        # Performing VQ to correct the incomplete predictions of diffusion.        
+        # Performing VQ to correct the incomplete predictions of diffusion.
         latents = self.encodec.quantizer.encode(
             x= latents,
             sample_rate= self.encodec.frame_rate,

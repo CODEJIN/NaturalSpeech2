@@ -83,6 +83,9 @@ class Trainer:
 
     def Dataset_Generate(self):
         token_dict = yaml.load(open(self.hp.Token_Path, 'r', encoding= 'utf-8-sig'), Loader=yaml.Loader)
+        latent_range_info_dict = yaml.load(open(self.hp.Latent_Range_Info_Path, 'r'), Loader=yaml.Loader)
+        self.latent_min = min([x['Min'] for x in latent_range_info_dict.values()])
+        self.latent_max = max([x['Max'] for x in latent_range_info_dict.values()])
         f0_info_dict = yaml.load(open(self.hp.F0_Info_Path, 'r'), Loader=yaml.Loader)
 
         train_dataset = Dataset(
@@ -164,7 +167,11 @@ class Trainer:
             )
 
     def Model_Generate(self):
-        self.model = NaturalSpeech2(self.hp).to(self.device)
+        self.model = NaturalSpeech2(
+            hyper_parameters= self.hp,
+            latent_min= self.latent_min,
+            latent_max= self.latent_max
+            ).to(self.device)
         self.criterion_dict = {
             'MSE': torch.nn.MSELoss(reduction= 'none').to(self.device),
             'MAE': torch.nn.L1Loss(reduction= 'none').to(self.device),
@@ -241,6 +248,7 @@ class Trainer:
                 loss_dict['Attention_Binarization'] = self.criterion_dict['Attention_Binarization'](attention_hards, attention_softs)
                 loss_dict['Attention_CTC'] = self.criterion_dict['Attention_CTC'](attention_logprobs, token_lengths, latent_lengths)
 
+        self.optimizer.zero_grad()
         self.scaler.scale(
             loss_dict['Diffusion'] +
             loss_dict['Duration'] +
@@ -249,8 +257,20 @@ class Trainer:
             loss_dict['Attention_Binarization'] +
             loss_dict['Attention_CTC']
             ).backward()
+        
+        for name, parameters in self.model.named_parameters():
+            if parameters.grad is None:
+                continue
+            if not name in self.accumulated_grad_dict.keys():
+                self.accumulated_grad_dict[name] = 0.0
+            self.accumulated_grad_dict[name] += parameters.grad.clone()
 
-        if self.steps % self.hp.Train.Accumulated_Gradient_Step:
+        if (self.steps + 1) % self.hp.Train.Accumulated_Gradient_Step == 0:
+            for name, parameters in self.model.named_parameters():
+                if not name in self.accumulated_grad_dict.keys():
+                    continue
+                parameters.grad = self.accumulated_grad_dict[name]
+
             self.scaler.unscale_(self.optimizer)
 
             if self.hp.Train.Gradient_Norm > 0.0:
@@ -258,13 +278,11 @@ class Trainer:
                     parameters= self.model.parameters(),
                     max_norm= self.hp.Train.Gradient_Norm
                     )
-            
+        
             self.scaler.step(self.optimizer)
             self.scaler.update()
-
             self.scheduler.step()
-
-            self.optimizer.zero_grad()
+            self.accumulated_grad_dict = {}
 
         self.steps += 1
         self.tqdm.update(1)
@@ -274,7 +292,7 @@ class Trainer:
             self.scalar_dict['Train']['Loss/{}'.format(tag)] += loss
 
     def Train_Epoch(self):
-        self.optimizer.zero_grad()  # to accumulated gradient
+        self.accumulated_grad_dict = {}
         for tokens, token_lengths, speech_prompts, speech_prompts_for_diffusion, latents, latent_lengths, f0s, mels, attention_priors in self.dataloader_dict['Train']:
             self.Train_Step(
                 tokens= tokens,

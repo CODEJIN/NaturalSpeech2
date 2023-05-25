@@ -853,8 +853,9 @@ def Metadata_Generate(eval: bool= False):
                 if not pattern_dict['Speaker'] in f0_dict.keys():
                     f0_dict[pattern_dict['Speaker']] = []
                 
-                latent_range_dict[pattern_dict['Speaker']]['Min'] = min(latent_range_dict[pattern_dict['Speaker']]['Min'], pattern_dict['Latent'].min().item())
-                latent_range_dict[pattern_dict['Speaker']]['Max'] = max(latent_range_dict[pattern_dict['Speaker']]['Max'], pattern_dict['Latent'].max().item())
+                latent = encodec.quantizer.decode(torch.from_numpy(pattern_dict['Latent']).unsqueeze(1).long()).squeeze(0)
+                latent_range_dict[pattern_dict['Speaker']]['Min'] = min(latent_range_dict[pattern_dict['Speaker']]['Min'], latent.min().item())
+                latent_range_dict[pattern_dict['Speaker']]['Max'] = max(latent_range_dict[pattern_dict['Speaker']]['Max'], latent.max().item())
                 mel_range_dict[pattern_dict['Speaker']]['Min'] = min(mel_range_dict[pattern_dict['Speaker']]['Min'], pattern_dict['Mel'].min().item())
                 mel_range_dict[pattern_dict['Speaker']]['Max'] = max(mel_range_dict[pattern_dict['Speaker']]['Max'], pattern_dict['Mel'].max().item())
 
