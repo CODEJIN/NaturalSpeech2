@@ -104,7 +104,7 @@ class NaturalSpeech2(torch.nn.Module):
         latent_codes = latents
         with torch.no_grad():
             latents = self.encodec.quantizer.decode(latents.permute(1, 0, 2))
-            latents = (latents - self.latent_min) / (self.latent_max - self.latent_min)
+            latents = (latents - self.latent_min) / (self.latent_max - self.latent_min) * 2.0 - 1.0
             speech_prompts = self.encodec.quantizer.decode(speech_prompts.permute(1, 0, 2))
             speech_prompts_for_diffusion = self.encodec.quantizer.decode(speech_prompts_for_diffusion.permute(1, 0, 2))
 
@@ -162,7 +162,7 @@ class NaturalSpeech2(torch.nn.Module):
             )
         
         ce_rvq_losses = self.ce_rvq(
-            diffusion_starts= diffusion_starts * (self.latent_max - self.latent_min) + self.latent_min,
+            diffusion_starts= (diffusion_starts + 1.0) * 0.5 * (self.latent_max - self.latent_min) + self.latent_min,
             target_latent_codes= latent_codes_slice
             )
 
@@ -208,7 +208,7 @@ class NaturalSpeech2(torch.nn.Module):
                 lengths= latent_lengths,
                 speech_prompts= speech_prompts,
                 )
-        latents = latents * (self.latent_max - self.latent_min) + self.latent_min
+        latents = (latents + 1.0) * 0.5 * (self.latent_max - self.latent_min) + self.latent_min
         
         # Performing VQ to correct the incomplete predictions of diffusion.
         latents = self.encodec.quantizer.encode(

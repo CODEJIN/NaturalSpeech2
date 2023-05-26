@@ -70,20 +70,20 @@ Diffusion:
 Audio_Codec:
     Size: 128
 
-Token_Path: 'D:/Datasets/22K.NaturalSpeech2.LJ/Token.yaml'
-Latent_Range_Info_Path: 'D:/Datasets/22K.NaturalSpeech2.LJ/Latent_Range_Info.yaml'
-Mel_Range_Info_Path: 'D:/Datasets/22K.NaturalSpeech2.LJ/Mel_Range_Info.yaml'
-F0_Info_Path: 'D:/Datasets/22K.NaturalSpeech2.LJ/F0_Info.yaml'
-Speaker_Info_Path: 'D:/Datasets/22K.NaturalSpeech2.LJ/Speaker_Info.yaml'
-Emotion_Info_Path: 'D:/Datasets/22K.NaturalSpeech2.LJ/Emotion_Info.yaml'
-Language_Info_Path: 'D:/Datasets/22K.NaturalSpeech2.LJ/Language_Info.yaml'
-Gender_Info_Path: 'D:/Datasets/22K.NaturalSpeech2.LJ/Gender_Info.yaml'
-Language_and_Gender_Info_by_Speaker_Path: 'D:/Datasets/22K.NaturalSpeech2.LJ/Language_and_Gender_Info_by_Speaker.yaml'
+Token_Path: 'F:/Datasets/22K.NaturalSpeech2.LJ/Token.yaml'
+Latent_Range_Info_Path: 'F:/Datasets/22K.NaturalSpeech2.LJ/Latent_Range_Info.yaml'
+Mel_Range_Info_Path: 'F:/Datasets/22K.NaturalSpeech2.LJ/Mel_Range_Info.yaml'
+F0_Info_Path: 'F:/Datasets/22K.NaturalSpeech2.LJ/F0_Info.yaml'
+Speaker_Info_Path: 'F:/Datasets/22K.NaturalSpeech2.LJ/Speaker_Info.yaml'
+Emotion_Info_Path: 'F:/Datasets/22K.NaturalSpeech2.LJ/Emotion_Info.yaml'
+Language_Info_Path: 'F:/Datasets/22K.NaturalSpeech2.LJ/Language_Info.yaml'
+Gender_Info_Path: 'F:/Datasets/22K.NaturalSpeech2.LJ/Gender_Info.yaml'
+Language_and_Gender_Info_by_Speaker_Path: 'F:/Datasets/22K.NaturalSpeech2.LJ/Language_and_Gender_Info_by_Speaker.yaml'
 Train:
     Pattern_Cache: true
     # Pattern_Cache: false
     Train_Pattern:
-        Path: 'D:/Datasets/22K.NaturalSpeech2.LJ/Train'
+        Path: 'F:/Datasets/22K.NaturalSpeech2.LJ/Train'
         Metadata_File: 'METADATA.PICKLE'
         Feature_Length:
             Min: 100
@@ -94,7 +94,7 @@ Train:
         Accumulated_Dataset_Epoch: 1 # This is to prevent slow down from torch.utils.data.DataLoader when the number of patterns is small.
         Augmentation_Ratio: 0.10
     Eval_Pattern:
-        Path: 'D:/Datasets/22K.NaturalSpeech2.LJ/Eval'
+        Path: 'F:/Datasets/22K.NaturalSpeech2.LJ/Eval'
         Metadata_File: 'METADATA.PICKLE'
         Feature_Length:
             Min: 100
