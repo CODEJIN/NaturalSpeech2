@@ -954,22 +954,22 @@ def Token_dict_Generate(tokens: Union[List[str], str]):
     return token_dict
 
 if __name__ == '__main__':
-    argParser = argparse.ArgumentParser()
-    argParser.add_argument("-hp", "--hyper_parameters", required=True, type= str)
-    argParser.add_argument("-selvas", "--selvas_path", required=False)
-    argParser.add_argument("-kss", "--kss_path", required=False)
-    argParser.add_argument("-aihub", "--aihub_path", required=False)
+    parser = argparse.ArgumentParser()
+    parser.add_argument("-hp", "--hyper_parameters", required=True, type= str)
+    parser.add_argument("-selvas", "--selvas_path", required=False)
+    parser.add_argument("-kss", "--kss_path", required=False)
+    parser.add_argument("-aihub", "--aihub_path", required=False)
 
-    argParser.add_argument("-vctk", "--vctk_path", required=False)
-    argParser.add_argument("-libri", "--libri_path", required=False)
-    argParser.add_argument("-lj", "--lj_path", required=False)
-    argParser.add_argument("-mls", "--mls_path", required=False)
+    parser.add_argument("-vctk", "--vctk_path", required=False)
+    parser.add_argument("-libri", "--libri_path", required=False)
+    parser.add_argument("-lj", "--lj_path", required=False)
+    parser.add_argument("-mls", "--mls_path", required=False)
 
-    argParser.add_argument("-evalr", "--eval_ratio", default= 0.001, type= float)
-    argParser.add_argument("-evalm", "--eval_min", default= 1, type= int)
-    argParser.add_argument("-mw", "--max_worker", default= 2, required=False, type= int)
+    parser.add_argument("-evalr", "--eval_ratio", default= 0.001, type= float)
+    parser.add_argument("-evalm", "--eval_min", default= 1, type= int)
+    parser.add_argument("-mw", "--max_worker", default= 2, required=False, type= int)
 
-    args = argParser.parse_args()
+    args = parser.parse_args()
 
     global hp
     hp = Recursive_Parse(yaml.load(

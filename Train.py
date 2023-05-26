@@ -731,11 +731,11 @@ class Trainer:
         logging.info('Finished training.')
 
 if __name__ == '__main__':
-    argParser = argparse.ArgumentParser()
-    argParser.add_argument('-hp', '--hyper_parameters', required= True, type= str)
-    argParser.add_argument('-s', '--steps', default= 0, type= int)
-    argParser.add_argument('-r', '--local-rank', default= 0, type= int)
-    args = argParser.parse_args()
+    parser = argparse.ArgumentParser()
+    parser.add_argument('-hp', '--hyper_parameters', required= True, type= str)
+    parser.add_argument('-s', '--steps', default= 0, type= int)
+    parser.add_argument('-r', '--local-rank', default= 0, type= int)
+    args = parser.parse_args()
 
     hp = Recursive_Parse(yaml.load(
         open(args.hyper_parameters, encoding='utf-8'),
@@ -749,5 +749,5 @@ if __name__ == '__main__':
             num_gpus= int(os.getenv("WORLD_SIZE", '1')),
             dist_backend= 'nccl'
             )
-    new_Trainer = Trainer(hp_path= args.hyper_parameters, steps= args.steps)
-    new_Trainer.Train()
+    trainer = Trainer(hp_path= args.hyper_parameters, steps= args.steps)
+    trainer.Train()
