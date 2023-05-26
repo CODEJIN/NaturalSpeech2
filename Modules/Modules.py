@@ -111,7 +111,7 @@ class NaturalSpeech2(torch.nn.Module):
         encodings = self.encoder(
             tokens= tokens,
             lengths= token_lengths
-            )
+            )   
         speech_prompts = self.speech_prompter(speech_prompts)
         speech_prompts_for_diffusion = self.speech_prompter(speech_prompts_for_diffusion)
 
