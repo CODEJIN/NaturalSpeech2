@@ -83,9 +83,9 @@ class Trainer:
 
     def Dataset_Generate(self):
         token_dict = yaml.load(open(self.hp.Token_Path, 'r', encoding= 'utf-8-sig'), Loader=yaml.Loader)
-        latent_range_info_dict = yaml.load(open(self.hp.Latent_Range_Info_Path, 'r'), Loader=yaml.Loader)
-        self.latent_min = min([x['Min'] for x in latent_range_info_dict.values()])
-        self.latent_max = max([x['Max'] for x in latent_range_info_dict.values()])
+        latent_info_dict = yaml.load(open(self.hp.Latent_Info_Path, 'r'), Loader=yaml.Loader)
+        self.latent_mean = sum([x['Mean'] for x in latent_info_dict.values()]) / len(latent_info_dict)
+        self.latent_std = sum([x['Std'] for x in latent_info_dict.values()]) / len(latent_info_dict)
         f0_info_dict = yaml.load(open(self.hp.F0_Info_Path, 'r'), Loader=yaml.Loader)
 
         train_dataset = Dataset(
@@ -169,8 +169,8 @@ class Trainer:
     def Model_Generate(self):
         self.model = NaturalSpeech2(
             hyper_parameters= self.hp,
-            latent_min= self.latent_min,
-            latent_max= self.latent_max
+            latent_mean= self.latent_mean,
+            latent_std= self.latent_std
             ).to(self.device)
         self.criterion_dict = {
             'MSE': torch.nn.MSELoss(reduction= 'none').to(self.device),

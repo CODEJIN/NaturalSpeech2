@@ -64,14 +64,14 @@ Diffusion:
             Apply_in_Stack: 3
             Head: 8
     CERVQ:
-        Num_Sample: 32 # max: 32
+        Num_Sample: 4 # max: 32
         Use_Weighted_Sample: true
 
 Audio_Codec:
     Size: 128
 
 Token_Path: 'F:/Datasets/22K.NaturalSpeech2.LJ/Token.yaml'
-Latent_Range_Info_Path: 'F:/Datasets/22K.NaturalSpeech2.LJ/Latent_Range_Info.yaml'
+Latent_Info_Path: 'F:/Datasets/22K.NaturalSpeech2.LJ/Latent_Info.yaml'
 Mel_Range_Info_Path: 'F:/Datasets/22K.NaturalSpeech2.LJ/Mel_Range_Info.yaml'
 F0_Info_Path: 'F:/Datasets/22K.NaturalSpeech2.LJ/F0_Info.yaml'
 Speaker_Info_Path: 'F:/Datasets/22K.NaturalSpeech2.LJ/Speaker_Info.yaml'
@@ -103,7 +103,7 @@ Train:
             Min: 10
             Max: 200
     Num_Workers: 0
-    Batch_Size: 4
+    Batch_Size: 8
     Segment_Size: 64
     Learning_Rate:
         Initial: 5.0e-4
@@ -138,16 +138,16 @@ Train:
 
 Inference_Batch_Size: 16
 
-Inference_Path: './results/LJ_230525/Inference'
-Checkpoint_Path: './results/LJ_230525/Checkpoint'
-Log_Path: './results/LJ_230525/Log'
+Inference_Path: './results/LJ_230531/Inference'
+Checkpoint_Path: './results/LJ_230531/Checkpoint'
+Log_Path: './results/LJ_230531/Log'
 
 Weights_and_Biases:
     # Use: true
     Use: false
     Project: 'NaturalSpeech2'
     Entity: 'codejin'
-    Name: 'LJ_230525'
+    Name: 'LJ_230531'
     Save_Checkpoint:
         Use: false
         Interval: 50000 # Unlike local, The capacity of WandB is small.

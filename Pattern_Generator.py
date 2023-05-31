@@ -793,6 +793,7 @@ def Metadata_Generate(eval: bool= False):
 
     latent_range_dict = {}
     mel_range_dict = {}
+    latent_dict = {}
     f0_dict = {}
     speakers = []
     emotions = []
@@ -815,7 +816,7 @@ def Metadata_Generate(eval: bool= False):
         'Text_Length_Dict': {},
         }
 
-    files_TQDM = tqdm(
+    files_tqdm = tqdm(
         total= sum([len(files) for root, _, files in os.walk(pattern_path, followlinks=True)]),
         desc= 'Eval_Pattern' if eval else 'Train_Pattern'
         )
@@ -850,18 +851,19 @@ def Metadata_Generate(eval: bool= False):
                     latent_range_dict[pattern_dict['Speaker']] = {'Min': math.inf, 'Max': -math.inf}
                 if not pattern_dict['Speaker'] in mel_range_dict.keys():
                     mel_range_dict[pattern_dict['Speaker']] = {'Min': math.inf, 'Max': -math.inf}
+                if not pattern_dict['Speaker'] in latent_dict.keys():
+                    latent_dict[pattern_dict['Speaker']] = []
                 if not pattern_dict['Speaker'] in f0_dict.keys():
                     f0_dict[pattern_dict['Speaker']] = []
                 
-                latent = encodec.quantizer.decode(torch.from_numpy(pattern_dict['Latent']).unsqueeze(1).long()).squeeze(0)
-                latent_range_dict[pattern_dict['Speaker']]['Min'] = min(latent_range_dict[pattern_dict['Speaker']]['Min'], latent.min().item())
-                latent_range_dict[pattern_dict['Speaker']]['Max'] = max(latent_range_dict[pattern_dict['Speaker']]['Max'], latent.max().item())
+                latent = encodec.quantizer.decode(torch.from_numpy(pattern_dict['Latent']).unsqueeze(1).long()).squeeze(0)                
                 mel_range_dict[pattern_dict['Speaker']]['Min'] = min(mel_range_dict[pattern_dict['Speaker']]['Min'], pattern_dict['Mel'].min().item())
                 mel_range_dict[pattern_dict['Speaker']]['Max'] = max(mel_range_dict[pattern_dict['Speaker']]['Max'], pattern_dict['Mel'].max().item())
 
+                latent_dict[pattern_dict['Speaker']].append(latent)
                 f0_dict[pattern_dict['Speaker']].append(pattern_dict['F0'])
                 speakers.append(pattern_dict['Speaker'])
-                emotions.append(pattern_dict['Emotion'])                
+                emotions.append(pattern_dict['Emotion'])
                 languages.append(pattern_dict['Language'])
                 genders.append(pattern_dict['Gender'])
                 language_and_gender_dict_by_speaker[pattern_dict['Speaker']] = {
@@ -871,7 +873,7 @@ def Metadata_Generate(eval: bool= False):
             except:
                 print('File \'{}\' is not correct pattern file. This file is ignored.'.format(file))
 
-            files_TQDM.update(1)
+            files_tqdm.update(1)
 
     with open(os.path.join(pattern_path, metadata_File.upper()).replace("\\", "/"), 'wb') as f:
         pickle.dump(new_metadata_dict, f, protocol= 4)
@@ -879,20 +881,35 @@ def Metadata_Generate(eval: bool= False):
     if not eval:
         yaml.dump(
             latent_range_dict,
-            open(hp.Latent_Range_Info_Path, 'w')
+            open(hp.Latent_Info_Path, 'w')
             )
         yaml.dump(
             mel_range_dict,
             open(hp.Mel_Range_Info_Path, 'w')
             )
         
+        latent_info_dict = {}
+        for speaker, latent_list in latent_dict.items():
+            latent = np.hstack(latent_list).astype(np.float32)
+            latent_info_dict[speaker] = {
+                'Min': latent.min().item(),
+                'Max': latent.max().item(),
+                'Mean': latent.mean().item(),
+                'Std': latent.std().item()
+                }
+        yaml.dump(
+            latent_info_dict,
+            open(hp.Latent_Info_Path, 'w')
+            )
+
         f0_info_dict = {}
         for speaker, f0_list in f0_dict.items():
             f0 = np.hstack(f0_list)
             f0 = np.clip(f0, 0, np.inf)
             f0 = f0[f0 != 0.0].astype(np.float32)
-
             f0_info_dict[speaker] = {
+                'Min': f0.min().item(),
+                'Max': f0.max().item(),
                 'Mean': f0.mean().item(),
                 'Std': f0.std().item()
                 }
