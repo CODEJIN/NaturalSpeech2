@@ -9,7 +9,6 @@ from random import sample
 
 from .Nvidia_Alignment_Learning_Framework import Alignment_Learning_Framework
 from .Diffusion import Diffusion
-from .LinearAttention import LinearAttention
 from .Layer import Conv1d, RMSNorm
 
 
@@ -276,12 +275,13 @@ class FFT_Block(torch.nn.Module):
         ) -> None:
         super().__init__()
 
-        self.attention = LinearAttention(
-            query_channels= channels,
-            key_channels= channels, 
-            value_channels= channels,
-            calc_channels= channels,
+        self.positional_embedding = Positional_Embedding(channels)
+        self.attention = torch.nn.MultiheadAttention(
+            embed_dim= channels,
             num_heads= num_head
+            )
+        self.attention_norm = RMSNorm(
+            num_features= channels
             )
         
         self.ffn = FFN(
@@ -300,13 +300,18 @@ class FFT_Block(torch.nn.Module):
         '''
         masks = Mask_Generate(lengths= lengths, max_length= torch.ones_like(x[0, 0]).sum())   # [Batch, Time]
 
-        # Attention + Dropout + Residual + Norm
+        x = self.positional_embedding(x)
+
+        # Attention + Residual + Norm
+        residuals = x
+        x = x.permute(2, 0, 1)
         x = self.attention(
-            queries= x,
-            keys= x,
-            values= x,
-            key_padding_masks= masks
-            )
+            query= x,
+            key= x,
+            value= x,
+            key_padding_mask= masks
+            )[0].permute(1, 2, 0)
+        x = self.attention_norm(x + residuals)
 
         # FFN + Dropout + Norm
         float_masks = (~masks).unsqueeze(1).float()   # float mask
@@ -364,6 +369,21 @@ class FFN(torch.nn.Module):
         x = self.norm_1(x + residuals)
 
         return x * masks
+
+class Positional_Embedding(torch.nn.Module):
+    def __init__(
+        self,
+        channels: int
+        ):
+        super().__init__()
+        self.weight = torch.nn.Parameter(torch.randn(channels // 2))
+
+    def forward(self, x: torch.Tensor):
+        sequences = torch.arange(0, x.size(2), device= x.device).unsqueeze(0)    # [1, Time]        
+        embeddings = sequences * self.weight.unsqueeze(1) * 2.0 * math.pi   # [Dim // 2, Time]
+        embeddings = torch.cat([embeddings.sin(), embeddings.cos()], dim= 0).unsqueeze(0)    # [1, Dim, Time]
+
+        return x + embeddings
 
 
 class Speech_Prompter(torch.nn.Module):
@@ -528,12 +548,17 @@ class Variance_Predictor(torch.nn.Module):
             self.conv_blocks.append(conv_block)
 
         self.attentions = torch.nn.ModuleList([
-            LinearAttention(
-                query_channels= channels,
-                key_channels= condition_channels, 
-                value_channels= condition_channels,
-                calc_channels= channels,
+            torch.nn.MultiheadAttention(
+                embed_dim= channels,
                 num_heads= attention_num_head,
+                kdim= condition_channels,
+                vdim= condition_channels,
+                )
+            for index in range(stack)
+            ])
+        self.attention_norms = torch.nn.ModuleList([
+            RMSNorm(
+                num_features= channels
                 )
             for index in range(stack)
             ])
@@ -559,16 +584,18 @@ class Variance_Predictor(torch.nn.Module):
         masks = (~Mask_Generate(lengths= lengths, max_length= torch.ones_like(encodings[0, 0]).sum())).unsqueeze(1).float()   # float mask, [Batch, 1, Enc_t]
         x = encodings
 
-        for conv_blocks, attention in zip(self.conv_blocks, self.attentions):
+        for conv_blocks, attention, attention_norm in zip(self.conv_blocks, self.attentions, self.attention_norms):
             for conv_block in conv_blocks:
                 x = conv_block(x * masks) + x
 
             # Attention + Dropout + Residual + Norm
+            residuals = x
             x = attention(
-                queries= x,
-                keys= speech_prompts,
-                values= speech_prompts
-                )
+                query= x.permute(2, 0, 1),
+                key= speech_prompts.permute(2, 0, 1),
+                value= speech_prompts.permute(2, 0, 1)
+                )[0].permute(1, 2, 0)
+            x = attention_norm(x + residuals)
 
         x = self.projection(x * masks) * masks
 

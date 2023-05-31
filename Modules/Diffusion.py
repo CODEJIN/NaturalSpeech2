@@ -5,8 +5,7 @@ from argparse import Namespace
 from typing import Optional, List, Dict, Union
 from tqdm import tqdm
 
-from .LinearAttention import LinearAttention
-from .Layer import Conv1d, Lambda
+from .Layer import Conv1d, Lambda, RMSNorm
 
 class Diffusion(torch.nn.Module):
     def __init__(
@@ -246,12 +245,14 @@ class Denoiser(torch.nn.Module):
                 )
             )
         
-        self.pre_attention = LinearAttention(
-            query_channels= self.hp.Diffusion.Pre_Attention.Query_Size,
-            key_channels= self.hp.Speech_Prompter.Size, 
-            value_channels= self.hp.Speech_Prompter.Size,
-            calc_channels= self.hp.Diffusion.Pre_Attention.Query_Size,
-            num_heads= self.hp.Diffusion.Pre_Attention.Head
+        self.pre_attention = torch.nn.MultiheadAttention(
+            embed_dim= self.hp.Diffusion.Pre_Attention.Query_Size,
+            num_heads= self.hp.Diffusion.Pre_Attention.Head,
+            kdim= self.hp.Speech_Prompter.Size,
+            vdim= self.hp.Speech_Prompter.Size,
+            )
+        self.pre_attention_norm = RMSNorm(
+            num_features= self.hp.Diffusion.Pre_Attention.Query_Size
             )
 
         self.pre_attention_query = torch.nn.Parameter(
@@ -306,11 +307,13 @@ class Denoiser(torch.nn.Module):
         encodings = self.encoding_ffn(encodings) # [Batch, Diffusion_d, Audio_ct]
         diffusion_steps = self.step_ffn(diffusion_steps) # [Batch, Diffusion_d, 1]
 
+        queries = self.pre_attention_query.expand(speech_prompts.size(0), -1, -1)
         speech_prompts = self.pre_attention(
-            queries= self.pre_attention_query.expand(speech_prompts.size(0), -1, -1),
-            keys= speech_prompts,
-            values= speech_prompts
-            )   # [Batch, Diffusion_d, Token_n]
+            query= queries.permute(2, 0, 1),
+            key= speech_prompts.permute(2, 0, 1),
+            value= speech_prompts.permute(2, 0, 1)
+            )[0].permute(1, 2, 0)   # [Batch, Diffusion_d, Token_n]
+        speech_prompts = self.pre_attention_norm(speech_prompts + queries)
         
         skips_list = []
         for wavenet in self.wavenets:
@@ -384,12 +387,14 @@ class WaveNet(torch.nn.Module):
             )
         
         if apply_film:
-            self.attention = LinearAttention(
-                query_channels= channels,
-                key_channels= speech_prompt_channels, 
-                value_channels= speech_prompt_channels,
-                calc_channels= channels,
+            self.attention = torch.nn.MultiheadAttention(
+                embed_dim= channels,
                 num_heads= speech_prompt_attention_head,
+                kdim= speech_prompt_channels,
+                vdim= speech_prompt_channels,
+                )
+            self.attention_norm = RMSNorm(
+                num_features= channels
                 )
             self.film = FilM(
                 channels= channels * 2,
@@ -412,10 +417,11 @@ class WaveNet(torch.nn.Module):
 
         if self.apply_film:
             prompt_conditions = self.attention(
-                queries= queries,
-                keys= speech_prompts,
-                values= speech_prompts,
-                )   # [Batch, Diffusion_d, Time]
+                query= queries.permute(2, 0, 1),
+                key= speech_prompts.permute(2, 0, 1),
+                value= speech_prompts.permute(2, 0, 1),
+                )[0].permute(1, 2, 0)   # [Batch, Diffusion_d, Time]
+            prompt_conditions = self.attention_norm(prompt_conditions + queries)
             x = self.film(x, prompt_conditions, masks)
 
         x = Fused_Gate(x) # [Batch, Calc_d, Time]

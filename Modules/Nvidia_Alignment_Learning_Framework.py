@@ -39,7 +39,7 @@ import functools
 from scipy import ndimage
 from scipy.stats import betabinom
 
-from .LinearAttention import LinearAttention
+from .Layer import RMSNorm
 
 class ConvNorm(torch.nn.Module):
     def __init__(self, in_channels, out_channels, kernel_size=1, stride=1,
@@ -415,12 +415,14 @@ class Alignment_Learning_Framework(torch.nn.Module):
         ):
         super().__init__()
 
-        self.prompt_attention = LinearAttention(
-            query_channels= encoding_size,
-            key_channels= condition_channels, 
-            value_channels= condition_channels,
-            calc_channels= encoding_size,
-            num_heads= condition_attenion_head
+        self.prompt_attention = torch.nn.MultiheadAttention(
+            embed_dim= encoding_size,
+            num_heads= condition_attenion_head,
+            kdim= condition_channels,
+            vdim= condition_channels,
+            )
+        self.prompt_attention_norm = RMSNorm(
+            num_features= encoding_size
             )
 
         self.attention = ConvAttention(
@@ -440,11 +442,13 @@ class Alignment_Learning_Framework(torch.nn.Module):
         feature_lengths: torch.Tensor,
         attention_priors: torch.Tensor
         ):
+        residuals = token_embeddings
         token_embeddings = self.prompt_attention(
-            queries= token_embeddings,
-            keys= conditions,
-            values= conditions
-            )
+            query= token_embeddings.permute(2, 0, 1),
+            key= conditions.permute(2, 0, 1),
+            value= conditions.permute(2, 0, 1)
+            )[0].permute(1, 2, 0)
+        token_embeddings = self.prompt_attention_norm(token_embeddings + residuals)
 
         attention_masks = mask_from_lens(encoding_lengths, max_len=encoding_lengths.max())
         attention_masks = attention_masks[..., None] == 0
