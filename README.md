@@ -9,9 +9,6 @@ Shen, K., Ju, Z., Tan, X., Liu, Y., Leng, Y., He, L., ... & Bian, J. (2023). Nat
 
 # Modifications from Paper
 * The structure is derived from NaturalSpeech 2, but I made several modifications.
-* Linear attention is applied instead of dot product-based multihead attention.
-    * This change was made to reduce memory usage and improve computational speed in insufficient enviornment.
-    * This may be a reason of the performance degradation.
 * About CE-RVQ
     * The CE-RVQ implementation in the current repository is incomplete.
         * I had doubts about the loss calculation formula mentioned in the paper, so the previous implementation has been commented out.
@@ -36,6 +33,7 @@ Shen, K., Ju, Z., Tan, X., Liu, Y., Leng, Y., He, L., ... & Bian, J. (2023). Nat
     * Using external modules such as Montreal Force Alignment (MFA) may have benefits in terms of training speed or stability, but I prioritized simplifying the training process.    
 * Padding is applied between tokens like `'A <P> B <P> C ....'`
     * I could not verify whether there was a difference in performance depending on its usage.    
+
 
 # Supported dataset
 * To apply zero-shot reported in the paper, I believe that it is necessary to have as many speakers as possible in the training data, but I were unable to test [Multilingual LibriSpeech](https://www.openslr.org/94/) due to current environment.
