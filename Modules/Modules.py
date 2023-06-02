@@ -167,7 +167,7 @@ class NaturalSpeech2(torch.nn.Module):
             )
 
         return \
-            None, diffusion_targets, diffusion_predictions, \
+            None, latents_slice, diffusion_starts, diffusion_targets, diffusion_predictions, \
             duration_predictions, f0_predictions, ce_rvq_losses, \
             attention_softs, attention_hards, attention_logprobs, durations, None, None
 
@@ -218,7 +218,7 @@ class NaturalSpeech2(torch.nn.Module):
         predictions = self.encodec.decoder(latents).squeeze(1)  # [Batch, Audio_t]
 
         return \
-            predictions, None, None, \
+            predictions, None, None, None, None, \
             None, None, None, \
             None, None, None, durations, f0s, latent_lengths
 

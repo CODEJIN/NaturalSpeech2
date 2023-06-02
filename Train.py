@@ -208,7 +208,7 @@ class Trainer:
         attention_priors = attention_priors.to(self.device, non_blocking=True)
 
         with torch.cuda.amp.autocast(enabled= self.hp.Use_Mixed_Precision):
-            _, diffusion_targets, diffusion_predictions, \
+            _, latents_slice, diffusion_starts, diffusion_targets, diffusion_predictions, \
             duration_predictions, f0_predictions, ce_rvq_losses, \
             attention_softs, attention_hards, attention_logprobs, durations, _, _ = self.model(
                 tokens= tokens,
@@ -232,6 +232,10 @@ class Trainer:
                     max_length= latents.size(2)
                     ).to(latents.device)).float()
                 
+                loss_dict['Data'] = self.criterion_dict['MSE'](
+                    latents_slice,
+                    diffusion_starts,
+                    ).mean()
                 loss_dict['Diffusion'] = self.criterion_dict['MSE'](
                     diffusion_targets,
                     diffusion_predictions,
@@ -250,10 +254,11 @@ class Trainer:
 
         self.optimizer.zero_grad()
         self.scaler.scale(
+            loss_dict['Data'] +
             loss_dict['Diffusion'] +
             loss_dict['Duration'] +
             loss_dict['F0'] +
-            loss_dict['CE_RVQ'] +
+            self.hp.Train.Learning_Rate.CE_RVQ_Lambda * loss_dict['CE_RVQ'] +
             loss_dict['Attention_Binarization'] +
             loss_dict['Attention_CTC']
             ).backward()
@@ -349,7 +354,7 @@ class Trainer:
         attention_priors = attention_priors.to(self.device, non_blocking=True)
 
         with torch.cuda.amp.autocast(enabled= self.hp.Use_Mixed_Precision):
-            _, diffusion_targets, diffusion_predictions, \
+            _, latents_slice, diffusion_starts, diffusion_targets, diffusion_predictions, \
             duration_predictions, f0_predictions, ce_rvq_losses, \
             attention_softs, attention_hards, attention_logprobs, durations, _, _ = self.model(
                 tokens= tokens,
@@ -372,7 +377,11 @@ class Trainer:
                     lengths= latent_lengths,
                     max_length= latents.size(2)
                     ).to(latents.device)).float()
-                
+
+                loss_dict['Data'] = self.criterion_dict['MSE'](
+                    latents_slice,
+                    diffusion_starts,
+                    ).mean()
                 loss_dict['Diffusion'] = self.criterion_dict['MSE'](
                     diffusion_targets,
                     diffusion_predictions,
