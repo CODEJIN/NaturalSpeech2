@@ -25,14 +25,12 @@ class NaturalSpeech2(torch.nn.Module):
         self.mel_min = mel_min
         self.mel_max = mel_max
 
-        self.encoder = Phoneme_Encoder(self.hp)
+        self.encoder = Encoder(self.hp)
         self.speech_prompter = Speech_Prompter(self.hp)
 
         self.alignment_learning_framework = Alignment_Learning_Framework(
             feature_size= self.hp.Sound.Mel_Dim,
-            encoding_size= self.hp.Encoder.Size,
-            condition_channels= self.hp.Speech_Prompter.Size,
-            condition_attenion_head= self.hp.Alignment_Learning_Framework.Condition_Attention_Head
+            encoding_size= self.hp.Encoder.Size
             )
 
         self.variance_block = Variance_Block(self.hp)
@@ -145,7 +143,7 @@ class NaturalSpeech2(torch.nn.Module):
             )
         
         return \
-            linear_predictions, None, mels_slice, noises, epsilons, duration_loss, f0_loss, \
+            linear_predictions, None, mels, noises, epsilons, duration_loss, f0_loss, \
             attention_softs, attention_hards, attention_logprobs, alignments, f0s
 
     def Inference(
@@ -196,7 +194,7 @@ class NaturalSpeech2(torch.nn.Module):
         
         return linear_predictions, diffusion_predictions, alignments, f0s
 
-class Phoneme_Encoder(torch.nn.Module): 
+class Encoder(torch.nn.Module): 
     def __init__(
         self,
         hyper_parameters: Namespace
@@ -208,7 +206,7 @@ class Phoneme_Encoder(torch.nn.Module):
             num_embeddings= self.hp.Tokens,
             embedding_dim= self.hp.Encoder.Size,
             )
-        torch.nn.init.kaiming_uniform_(self.token_embedding.weight)
+        torch.nn.init.xavier_uniform_(self.token_embedding.weight)
         
         self.blocks = torch.nn.ModuleList([
             FFT_Block(
@@ -334,7 +332,7 @@ class FFN(torch.nn.Module):
         super().__init__()
         self.conv_0 = Conv1d(
             in_channels= channels,
-            out_channels= channels * 4,
+            out_channels= channels,
             kernel_size= kernel_size,
             padding= (kernel_size - 1) // 2,
             w_init_gain= 'relu'
@@ -343,7 +341,7 @@ class FFN(torch.nn.Module):
         
         self.dropout = torch.nn.Dropout(p= dropout_rate)
         self.conv_1 = Conv1d(
-            in_channels= channels * 4,
+            in_channels= channels,
             out_channels= channels,
             kernel_size= kernel_size,
             padding= (kernel_size - 1) // 2,
@@ -669,59 +667,3 @@ def Mask_Generate(lengths: torch.Tensor, max_length: Optional[Union[int, torch.T
     max_length = max_length or torch.max(lengths)
     sequence = torch.arange(max_length)[None, :].to(lengths.device)
     return sequence >= lengths[:, None]    # [Batch, Time]
-
-class CE_RVQ(torch.nn.Module):
-    def __init__(
-        self,
-        encodec: EncodecModel,
-        rvq_sample: int= 4,
-        use_weighted_sample: bool= True
-        ):
-        super().__init__()
-        self.encodec = encodec
-        self.num_vq = encodec.quantizer.n_q
-        self.rvq_sample = rvq_sample
-        self.use_weighted_sample = use_weighted_sample
-
-    def forward(
-        self,
-        diffusion_starts: torch.FloatTensor,
-        target_latent_codes: torch.LongTensor
-        ):
-        '''
-        diffusion_starts: [Batch, Latent_d, Latent_t]
-        target_latent_codes: [Batch, Num_VQ, Latent_t]
-        '''
-        if self.use_weighted_sample:
-            sample_rvq_indices = sorted(np.random.choice(
-                range(self.num_vq),
-                p= np.arange(self.num_vq, 0, -1) / sum(range(1, self.num_vq + 1)),
-                size= self.rvq_sample,
-                replace= False,
-                ))
-        else:
-            sample_rvq_indices = sample(range(self.num_vq), self.rvq_sample)
-        
-        residuals = diffusion_starts
-        loss_list = []
-        for vq_index, (layer, latent_codes) in enumerate(zip(self.encodec.quantizer.vq.layers, target_latent_codes.permute(1, 0, 2))):
-            x = rearrange(residuals, 'batch latent_d latent_t -> batch latent_t latent_d')            
-            x = layer.project_in(x) # but, project_in == torch.nn.Identity.            
-            quantizations, _ = layer._codebook(x)
-            quantizations = layer.project_out(quantizations)   # but, project_out == torch.nn.Identity.
-            quantizations = rearrange(quantizations, 'batch latent_t latent_d -> batch latent_d latent_t')   # [Batch, Latent_t, Latent_d]
-            residuals = residuals - quantizations.detach()
-
-            if vq_index in sample_rvq_indices:
-                x = rearrange(x, 'batch latent_t latent_d -> batch 1 latent_t latent_d')
-                codebooks = rearrange(layer._codebook.embed, 'num_codebook latent_d -> 1 num_codebook 1 latent_d')
-                logits = -(x - codebooks.detach()).pow(2.0).mean(dim= 3) # [Batch, Num_Codebook, Latent_t]
-                loss_list.append(torch.nn.functional.cross_entropy(logits, latent_codes, reduction='mean'))
-                
-                # loss_list.append(torch.nn.functional.mse_loss(
-                #     x,
-                #     layer._codebook.embed[latent_codes].detach(),
-                #     reduction= 'mean'
-                #     ))
-
-        return torch.stack(loss_list).mean()

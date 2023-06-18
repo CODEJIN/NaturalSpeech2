@@ -172,9 +172,9 @@ class Inference_Dataset(torch.utils.data.Dataset):
             token = pronunciation
         token = Text_to_Token(token, self.token_dict)
 
-        audio, _ = librosa.load(reference, sr= self.sample_rate)
+        audio, _ = librosa.load(reference, sr= self.hp.Sound.Sample_Rate)
         audio = librosa.util.normalize(audio) * 0.95
-        audio = audio[:audio.shape[0] - (audio.shape[0] % self.hop_size)]
+        audio = audio[:audio.shape[0] - (audio.shape[0] % self.hp.Sound.Frame_Shift)]
         speech_prompt_mel = mel_spectrogram(
             y= torch.from_numpy(audio).float().unsqueeze(0),
             n_fft= self.hp.Sound.N_FFT,

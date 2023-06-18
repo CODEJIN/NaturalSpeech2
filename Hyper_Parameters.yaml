@@ -17,11 +17,8 @@ Encoder:
         Stack: 6
         Head: 2
         FFN:
-            Kernel_Size: 9
-            Dropout_Rate: 0.2
-
-Alignment_Learning_Framework:
-    Condition_Attention_Head: 2
+            Kernel_Size: 17
+            Dropout_Rate: 0.1
 
 Speech_Prompter:
     Size: 384
@@ -52,17 +49,16 @@ F0_Predictor:
         Dropout_Rate: 0.5
 
 Frame_Prior_Network:
-    Size: 384
     Transformer:
         Stack: 6
         Head: 2
         FFN:
-            Kernel_Size: 9
-            Dropout_Rate: 0.2
+            Kernel_Size: 17
+            Dropout_Rate: 0.1
 
 Diffusion:
     Max_Step: 100
-    Size: 512
+    Size: 256
     Pre_Attention:
         Query_Token: 32
         Query_Size: 512
@@ -112,7 +108,7 @@ Train:
     Segment_Size: 64
     Learning_Rate:
         Initial: 1.0e-4
-        Warmup_Step: 32000
+        Warmup_Step: 4000
         CE_RVQ_Lambda: 0.1
     ADAM:
         Beta1: 0.9

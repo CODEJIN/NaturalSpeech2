@@ -407,9 +407,7 @@ class Alignment_Learning_Framework(torch.nn.Module):
     def __init__(
         self,
         feature_size: int,
-        encoding_size: int,
-        condition_channels: int,
-        condition_attenion_head: int
+        encoding_size: int
         ):
         super().__init__()
 

@@ -207,7 +207,7 @@ class Trainer:
         attention_priors = attention_priors.to(self.device, non_blocking=True)
 
         with torch.cuda.amp.autocast(enabled= self.hp.Use_Mixed_Precision):
-            linear_projections, _, mels_slice, noises, epsilons, duration_loss, f0_loss, \
+            linear_projections, _, mels_compressed, noises, epsilons, duration_loss, f0_loss, \
             attention_softs, attention_hards, attention_logprobs, alignments, f0s = self.model(
                 tokens= tokens,
                 token_lengths= token_lengths,
@@ -228,17 +228,17 @@ class Trainer:
                     lengths= mel_lengths,
                     max_length= mels.size(2)
                     ).to(mels.device)).float()
-                
+
                 loss_dict['Linear'] = (self.criterion_dict['MSE'](
                     linear_projections.float(),
-                    mels,
-                    ) * mel_masks.unsqueeze(1)).mean()
+                    mels_compressed,
+                    ) * mel_masks.unsqueeze(1)).mean(dim= 1).sum() / mel_masks.sum()
                 loss_dict['Diffusion'] = self.criterion_dict['MSE'](
                     epsilons.float(),
                     noises,
                     ).mean()
-                loss_dict['Duration'] = (duration_loss.float() * token_masks).sum()
-                loss_dict['F0'] = (f0_loss.float() * mel_masks).sum()
+                loss_dict['Duration'] = (duration_loss.float() * token_masks).sum() / token_masks.sum()
+                loss_dict['F0'] = (f0_loss.float() * mel_masks).sum() / mel_masks.sum()
                 loss_dict['Attention_Binarization'] = self.criterion_dict['Attention_Binarization'](attention_hards, attention_softs)
                 loss_dict['Attention_CTC'] = self.criterion_dict['Attention_CTC'](attention_logprobs, token_lengths, mel_lengths)
 
@@ -341,7 +341,7 @@ class Trainer:
         attention_priors = attention_priors.to(self.device, non_blocking=True)
 
         with torch.cuda.amp.autocast(enabled= self.hp.Use_Mixed_Precision):
-            linear_projections, _, mels_slice, noises, epsilons, duration_loss, f0_loss, \
+            linear_projections, _, mels_compressed, noises, epsilons, duration_loss, f0_loss, \
             attention_softs, attention_hards, attention_logprobs, alignments, f0s = self.model(
                 tokens= tokens,
                 token_lengths= token_lengths,
@@ -365,14 +365,14 @@ class Trainer:
 
                 loss_dict['Linear'] = (self.criterion_dict['MSE'](
                     linear_projections,
-                    mels,
-                    ) * mel_masks.unsqueeze(1)).mean()
+                    mels_compressed,
+                    ) * mel_masks.unsqueeze(1)).sum() / mel_masks.sum()
                 loss_dict['Diffusion'] = self.criterion_dict['MSE'](
                     epsilons,
                     noises,
                     ).mean()
-                loss_dict['Duration'] = (duration_loss.float() * token_masks).sum()
-                loss_dict['F0'] = (f0_loss.float() * mel_masks).sum()
+                loss_dict['Duration'] = (duration_loss.float() * token_masks).sum() / token_masks.sum()
+                loss_dict['F0'] = (f0_loss.float() * mel_masks).sum() / mel_masks.sum()
                 loss_dict['Attention_Binarization'] = self.criterion_dict['Attention_Binarization'](attention_hards, attention_softs)
                 loss_dict['Attention_CTC'] = self.criterion_dict['Attention_CTC'](attention_logprobs, token_lengths, mel_lengths)
 
@@ -433,8 +433,8 @@ class Trainer:
             diffusion_prediction_mel = diffusion_predictions[0, :, :prediction_mel_length]
 
             target_audio = (self.vocoder(target_mel.unsqueeze(0))[0, :target_audio_length].float() / 32768.0).clamp(-1.0, 1.0).cpu().numpy()
-            linear_prediction_audio = (self.vocoder(linear_prediction_mel.unsqueeze(0))[0, :prediction_audio_length].float() / 32768.0).clamp(-1.0, 1.0).cpu().numpy()  / 32768.0
-            diffusion_prediction_audio = (self.vocoder(diffusion_prediction_mel.unsqueeze(0))[0, :prediction_audio_length].float() / 32768.0).clamp(-1.0, 1.0).cpu().numpy()  / 32768.0
+            linear_prediction_audio = (self.vocoder(linear_prediction_mel.unsqueeze(0))[0, :prediction_audio_length].float() / 32768.0).clamp(-1.0, 1.0).cpu().numpy()
+            diffusion_prediction_audio = (self.vocoder(diffusion_prediction_mel.unsqueeze(0))[0, :prediction_audio_length].float() / 32768.0).clamp(-1.0, 1.0).cpu().numpy()
 
             target_mel = target_mel.cpu().numpy()
             linear_prediction_mel = linear_prediction_mel.cpu().numpy()
