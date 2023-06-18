@@ -2,7 +2,7 @@ from argparse import Namespace
 import torch
 import numpy as np
 import math
-from typing import Optional, Union
+from typing import Optional, Union, Tuple
 from encodec import EncodecModel
 from einops import rearrange
 from random import sample
@@ -17,13 +17,13 @@ class NaturalSpeech2(torch.nn.Module):
     def __init__(
         self,
         hyper_parameters: Namespace,
-        latent_mean: float,
-        latent_std: float,
+        mel_min: float,
+        mel_max: float,
         ):
         super().__init__()
         self.hp = hyper_parameters
-        self.latent_mean = latent_mean
-        self.latent_std = latent_std
+        self.mel_min = mel_min
+        self.mel_max = mel_max
 
         self.encoder = Phoneme_Encoder(self.hp)
         self.speech_prompter = Speech_Prompter(self.hp)
@@ -37,37 +37,29 @@ class NaturalSpeech2(torch.nn.Module):
 
         self.variance_block = Variacne_Block(self.hp)
 
+        self.frame_prior_network = Frame_Prior_Network(self.hp)
+
         self.diffusion = Diffusion(self.hp)
 
-        self.encodec = EncodecModel.encodec_model_24khz()
-
         self.segment = Segment()
-
-        self.ce_rvq = CE_RVQ(
-            encodec= self.encodec,
-            rvq_sample= self.hp.Diffusion.CERVQ.Num_Sample,
-            use_weighted_sample= self.hp.Diffusion.CERVQ.Use_Weighted_Sample
-            )
 
     def forward(
         self,
         tokens: torch.LongTensor,
         token_lengths: torch.LongTensor,
-        speech_prompts: torch.LongTensor,
-        speech_prompts_for_diffusion: Optional[torch.LongTensor]= None,
-        latents: Optional[torch.LongTensor]= None,
-        latent_lengths: Optional[torch.LongTensor]= None,
+        speech_prompts: torch.FloatTensor,
+        speech_prompts_for_diffusion: Optional[torch.FloatTensor]= None,
+        mels: Optional[torch.LongTensor]= None,
+        mel_lengths: Optional[torch.LongTensor]= None,
         f0s: Optional[torch.FloatTensor]= None,
-        mels: Optional[torch.FloatTensor]= None,
         attention_priors: Optional[torch.FloatTensor]= None,
         ddim_steps: Optional[int]= None
         ):
         if all([
             not speech_prompts_for_diffusion is None,
-            not latents is None,
-            not latent_lengths is None,
-            not f0s is None,
             not mels is None,
+            not mel_lengths is None,
+            not f0s is None,
             not attention_priors is None
             ]):    # train
             return self.Train(
@@ -75,10 +67,9 @@ class NaturalSpeech2(torch.nn.Module):
                 token_lengths= token_lengths,
                 speech_prompts= speech_prompts,
                 speech_prompts_for_diffusion= speech_prompts_for_diffusion,
-                latents= latents,
-                latent_lengths= latent_lengths,
-                f0s= f0s,
                 mels= mels,
+                mel_lengths= mel_lengths,
+                f0s= f0s,
                 attention_priors= attention_priors
                 )
         else:   #  inference
@@ -93,20 +84,14 @@ class NaturalSpeech2(torch.nn.Module):
         self,
         tokens: torch.LongTensor,
         token_lengths: torch.LongTensor,
-        speech_prompts: torch.LongTensor,
+        speech_prompts: torch.FloatTensor,
         speech_prompts_for_diffusion: torch.LongTensor,
-        latents: torch.LongTensor,
-        latent_lengths: torch.LongTensor,
-        f0s: torch.FloatTensor,
         mels: torch.Tensor,
+        mel_lengths: torch.LongTensor,
+        f0s: torch.FloatTensor,
         attention_priors: torch.Tensor,
         ):
-        latent_codes = latents
-        with torch.no_grad():
-            latents = self.encodec.quantizer.decode(latents.permute(1, 0, 2))
-            latents = (latents - self.latent_mean) / self.latent_std
-            speech_prompts = self.encodec.quantizer.decode(speech_prompts.permute(1, 0, 2))
-            speech_prompts_for_diffusion = self.encodec.quantizer.decode(speech_prompts_for_diffusion.permute(1, 0, 2))
+        mels = (mels - self.mel_min) / (self.mel_max - self.mel_min)
 
         encodings = self.encoder(
             tokens= tokens,
@@ -120,111 +105,97 @@ class NaturalSpeech2(torch.nn.Module):
             encoding_lengths= token_lengths,
             conditions= speech_prompts,
             features= mels,
-            feature_lengths= latent_lengths,
+            feature_lengths= mel_lengths,
             attention_priors= attention_priors
             )
 
-        encodings_expand, duration_predictions, f0_predictions, _, _, _ = self.variance_block(
+        encodings, duration_loss, f0_loss, alignments, f0s = self.variance_block(
             encodings= encodings,
             encoding_lengths= token_lengths,
             speech_prompts= speech_prompts,
             durations= durations,
             f0s= f0s,
-            latent_lengths= latent_lengths
+            latent_lengths= mel_lengths
             )
         
-        encodings_expand_slice, offsets = self.segment(
-            patterns= encodings_expand.permute(0, 2, 1),
-            segment_size= self.hp.Train.Segment_Size,
-            lengths= latent_lengths
-            )        
-        encodings_expand_slice = encodings_expand_slice.permute(0, 2, 1)
+        encodings, linear_projections = self.frame_prior_network(
+            encodings= encodings,
+            lengths= mel_lengths
+            )
+        encodings = torch.cat([encodings, linear_projections], dim= 1)
         
-        latent_codes_slice, _ = self.segment(
-            patterns= latent_codes.permute(0, 2, 1),
+        encodings_slice, offsets = self.segment(
+            patterns= encodings.permute(0, 2, 1),
+            segment_size= self.hp.Train.Segment_Size,
+            lengths= mel_lengths
+            )
+        encodings_slice = encodings_slice.permute(0, 2, 1)
+        
+        mels_slice, _ = self.segment(
+            patterns= mels.permute(0, 2, 1),
             segment_size= self.hp.Train.Segment_Size,
             offsets= offsets
             )
-        latent_codes_slice = latent_codes_slice.permute(0, 2, 1)
+        mels_slice = mels_slice.permute(0, 2, 1)
 
-        latents_slice, _ = self.segment(
-            patterns= latents.permute(0, 2, 1),
-            segment_size= self.hp.Train.Segment_Size,
-            offsets= offsets
-            )
-        latents_slice = latents_slice.permute(0, 2, 1)
-
-        _, diffusion_targets, diffusion_predictions, diffusion_starts = self.diffusion(
-            encodings= encodings_expand_slice,
-            lengths= torch.full_like(latent_lengths, fill_value= self.hp.Train.Segment_Size),
-            speech_prompts= speech_prompts_for_diffusion,
-            latents= latents_slice
+        noises, epsilons  = self.diffusion(
+            features= mels_slice,
+            encodings= encodings_slice,
+            lengths= torch.full_like(mel_lengths, fill_value= self.hp.Train.Segment_Size),
+            speech_prompts= speech_prompts_for_diffusion,            
             )
         
-        ce_rvq_losses = self.ce_rvq(
-            diffusion_starts= diffusion_starts * self.latent_std + self.latent_mean,
-            target_latent_codes= latent_codes_slice
-            )
-
         return \
-            None, latents_slice, diffusion_starts, diffusion_targets, diffusion_predictions, \
-            duration_predictions, f0_predictions, ce_rvq_losses, \
-            attention_softs, attention_hards, attention_logprobs, durations, None, None
+            linear_projections, None, mels_slice, noises, epsilons, duration_loss, f0_loss, \
+            attention_softs, attention_hards, attention_logprobs, alignments, f0s
 
     def Inference(
         self,
         tokens: torch.LongTensor,
         token_lengths: torch.LongTensor,
-        speech_prompts: torch.LongTensor,
+        speech_prompts: torch.FloatTensor,
         ddim_steps: Optional[int]= None,
-        temperature: float= 1.2 ** 2    # ignore now
+        temperature: Optional[float]= 1.2 ** 2    # ignore now
         ):
-        speech_prompts = self.encodec.quantizer.decode(speech_prompts.permute(1, 0, 2))
-        
         encodings = self.encoder(
             tokens= tokens,
             lengths= token_lengths
             )
         speech_prompts = self.speech_prompter(speech_prompts)
-
-        encodings_expand, _, _, durations, f0s, latent_lengths = self.variance_block(
+        
+        encodings, _, _, alignments, f0s = self.variance_block(
             encodings= encodings,
             encoding_lengths= token_lengths,
             speech_prompts= speech_prompts,
             )
+        mel_lengths = alignments.sum(dim= [1, 2])
+        
+        encodings, linear_projections = self.frame_prior_network(
+            encodings= encodings,
+            lengths= mel_lengths
+            )
+        encodings = torch.cat([encodings, linear_projections], dim= 1)
 
         if not ddim_steps is None and ddim_steps < self.hp.Diffusion.Max_Step:
-            latents = self.diffusion.DDIM(
-                encodings= encodings_expand,
-                lengths= latent_lengths,
+            diffusion_predictions = self.diffusion.DDIM(
+                encodings= encodings,
+                lengths= mel_lengths,
                 speech_prompts= speech_prompts,
-                ddim_steps= ddim_steps
+                ddim_steps= ddim_steps,
+                temperature= temperature
                 )        
         else:
-            latents = self.diffusion.DDPM(
-                encodings= encodings_expand,
-                lengths= latent_lengths,
+            diffusion_predictions = self.diffusion.DDPM(
+                encodings= encodings,
+                lengths= mel_lengths,
                 speech_prompts= speech_prompts,
+                temperature= temperature
                 )
-        latents = latents * self.latent_std + self.latent_mean
+
+        linear_projections = linear_projections * (self.mel_max - self.mel_min) + self.mel_min
+        diffusion_predictions = diffusion_predictions * (self.mel_max - self.mel_min) + self.mel_min
         
-        # Performing VQ to correct the incomplete predictions of diffusion.
-        latents = self.encodec.quantizer.encode(
-            x= latents,
-            sample_rate= self.encodec.frame_rate,
-            bandwidth= self.encodec.bandwidth
-            )
-        latents = self.encodec.quantizer.decode(latents)
-        predictions = self.encodec.decoder(latents).squeeze(1)  # [Batch, Audio_t]
-
-        return \
-            predictions, None, None, None, None, \
-            None, None, None, \
-            None, None, None, durations, f0s, latent_lengths
-
-    def train(self, mode: bool= True):
-        super().train(mode= mode)
-        self.encodec.eval() # encodec is always eval mode.
+        return linear_projections, diffusion_predictions, alignments, f0s
 
 class Phoneme_Encoder(torch.nn.Module): 
     def __init__(
@@ -265,6 +236,47 @@ class Phoneme_Encoder(torch.nn.Module):
             encodings = block(encodings, lengths)
         
         return encodings
+
+class Frame_Prior_Network(torch.nn.Module): 
+    def __init__(
+        self,
+        hyper_parameters: Namespace
+        ):
+        super().__init__()
+        self.hp = hyper_parameters
+
+        self.blocks = torch.nn.ModuleList([
+            FFT_Block(
+                channels= self.hp.Encoder.Size,
+                num_head= self.hp.Encoder.Transformer.Head,
+                feedforward_kernel_size= self.hp.Encoder.Transformer.FFN.Kernel_Size,
+                feedforward_dropout_rate= self.hp.Encoder.Transformer.FFN.Dropout_Rate,
+                )
+            for index in range(self.hp.Encoder.Transformer.Stack)
+            ])
+        
+        self.projection = Conv1d(
+            in_channels= self.hp.Encoder.Size,
+            out_channels= self.hp.Sound.Mel_Dim,
+            kernel_size= 1,
+            w_init_gain= 'linear'
+            )
+
+    def forward(
+        self,
+        encodings: torch.Tensor,
+        lengths: torch.Tensor,
+        ) -> Tuple[torch.Tensor, torch.Tensor]:
+        '''
+        tokens: [Batch, Time]
+        '''
+        for block in self.blocks:
+            encodings = block(encodings, lengths)
+
+        predictions = self.projection(encodings)
+        
+        return encodings, predictions
+
 
 class FFT_Block(torch.nn.Module):
     def __init__(
@@ -376,7 +388,7 @@ class Speech_Prompter(torch.nn.Module):
 
         self.prenet = torch.nn.Sequential(
             Conv1d(
-                in_channels= self.hp.Audio_Codec.Size,
+                in_channels= self.hp.Sound.Mel_Dim,
                 out_channels= self.hp.Speech_Prompter.Size,
                 kernel_size= 1,
                 w_init_gain= 'relu'
@@ -452,7 +464,8 @@ class Variacne_Block(torch.nn.Module):
             lengths= encoding_lengths,
             speech_prompts= speech_prompts
             )   # [Batch, Enc_t]
-                
+
+        duration_loss = None
         if durations is None:
             durations = duration_predictions.ceil().long() # [Batch, Enc_t]
             latent_lengths = torch.stack([
@@ -464,6 +477,8 @@ class Variacne_Block(torch.nn.Module):
             for duration, length in zip(durations, encoding_lengths):
                 duration[length - 1:] = 0
                 duration[length - 1] = max_duration_sum - duration.sum()
+        else:
+            duration_loss = torch.nn.functional.l1_loss(duration_predictions, durations, reduction= 'none')
 
         alignments = self.Length_Regulate(durations= durations)
         encodings = encodings @ alignments  # [Batch, Enc_d, Latent_t]
@@ -474,12 +489,16 @@ class Variacne_Block(torch.nn.Module):
             speech_prompts= speech_prompts
             )   # [Batch, Latent_t]
 
+        f0_loss = None
         if f0s is None:
             f0s = f0_predictions
+        else:
+            f0_loss = torch.nn.functional.l1_loss(f0_predictions, f0s, reduction= 'none')
 
         encodings = encodings + self.f0_embedding(f0s.unsqueeze(1))  # [Batch, Enc_d, Latent_t]
 
-        return encodings, duration_predictions, f0_predictions, durations, f0s, latent_lengths
+        return encodings, duration_loss, f0_loss, alignments, f0s
+        
     
     def Length_Regulate(
         self,

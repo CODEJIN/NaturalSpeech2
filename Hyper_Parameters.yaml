@@ -1,29 +1,33 @@
 Sound:
-    Frame_Shift: 320    # Encodec's frame
-    Sample_Rate: 16000
+    N_FFT: 1024
     Mel_Dim: 80
-    F0_Min: 65
-    F0_Max: 2094
+    Frame_Length: 1024
+    Frame_Shift: 256
+    Sample_Rate: 22050
+    Mel_F_Min: 0
+    Mel_F_Max: 8000
+    F0_Min: 50
+    F0_Max: 880
 
 Tokens: 55
 
 Encoder:
-    Size: 512
+    Size: 384
     Transformer:
         Stack: 6
-        Head: 8
+        Head: 2
         FFN:
             Kernel_Size: 9
             Dropout_Rate: 0.2
 
 Alignment_Learning_Framework:
-    Condition_Attention_Head: 8
+    Condition_Attention_Head: 2
 
 Speech_Prompter:
-    Size: 512
+    Size: 384
     Transformer:
         Stack: 6
-        Head: 8
+        Head: 2
         FFN:
             Kernel_Size: 9
             Dropout_Rate: 0.2
@@ -31,7 +35,7 @@ Speech_Prompter:
 Duration_Predictor:
     Stack: 10
     Attention:
-        Head: 8
+        Head: 2
     Conv:
         Kernel_Size: 3
         Stack: 3
@@ -41,20 +45,28 @@ Duration_Predictor:
 F0_Predictor:
     Stack: 10
     Attention:
-        Head: 8
+        Head: 2
     Conv:
         Kernel_Size: 3
         Stack: 3
         Dropout_Rate: 0.5
 
+Frame_Prior_Network:
+    Size: 384
+    Transformer:
+        Stack: 6
+        Head: 2
+        FFN:
+            Kernel_Size: 9
+            Dropout_Rate: 0.2
 
 Diffusion:
-    Max_Step: 1000
+    Max_Step: 100
     Size: 512
     Pre_Attention:
         Query_Token: 32
         Query_Size: 512
-        Head: 8
+        Head: 2
     WaveNet:
         Kernel_Size: 3
         Dilation: 2
@@ -62,51 +74,44 @@ Diffusion:
         Dropout_Rate: 0.2
         Attention:
             Apply_in_Stack: 3
-            Head: 8
-    CERVQ:
-        Num_Sample: 4 # max: 32
-        Use_Weighted_Sample: true
+            Head: 2
 
-Audio_Codec:
-    Size: 128
-
-Token_Path: 'F:/Datasets/22K.NaturalSpeech2.LJ/Token.yaml'
-Latent_Info_Path: 'F:/Datasets/22K.NaturalSpeech2.LJ/Latent_Info.yaml'
-Mel_Range_Info_Path: 'F:/Datasets/22K.NaturalSpeech2.LJ/Mel_Range_Info.yaml'
-F0_Info_Path: 'F:/Datasets/22K.NaturalSpeech2.LJ/F0_Info.yaml'
-Speaker_Info_Path: 'F:/Datasets/22K.NaturalSpeech2.LJ/Speaker_Info.yaml'
-Emotion_Info_Path: 'F:/Datasets/22K.NaturalSpeech2.LJ/Emotion_Info.yaml'
-Language_Info_Path: 'F:/Datasets/22K.NaturalSpeech2.LJ/Language_Info.yaml'
-Gender_Info_Path: 'F:/Datasets/22K.NaturalSpeech2.LJ/Gender_Info.yaml'
-Language_and_Gender_Info_by_Speaker_Path: 'F:/Datasets/22K.NaturalSpeech2.LJ/Language_and_Gender_Info_by_Speaker.yaml'
+Token_Path: 'F:/Datasets/22K.NaturalSpeech2_Mel.LJ/Token.yaml'
+Mel_Info_Path: 'F:/Datasets/22K.NaturalSpeech2_Mel.LJ/Mel_Info.yaml'
+F0_Info_Path: 'F:/Datasets/22K.NaturalSpeech2_Mel.LJ/F0_Info.yaml'
+Speaker_Info_Path: 'F:/Datasets/22K.NaturalSpeech2_Mel.LJ/Speaker_Info.yaml'
+Emotion_Info_Path: 'F:/Datasets/22K.NaturalSpeech2_Mel.LJ/Emotion_Info.yaml'
+Language_Info_Path: 'F:/Datasets/22K.NaturalSpeech2_Mel.LJ/Language_Info.yaml'
+Gender_Info_Path: 'F:/Datasets/22K.NaturalSpeech2_Mel.LJ/Gender_Info.yaml'
+Language_and_Gender_Info_by_Speaker_Path: 'F:/Datasets/22K.NaturalSpeech2_Mel.LJ/Language_and_Gender_Info_by_Speaker.yaml'
 Train:
     Pattern_Cache: true
     # Pattern_Cache: false
     Train_Pattern:
-        Path: 'F:/Datasets/22K.NaturalSpeech2.LJ/Train'
+        Path: 'F:/Datasets/22K.NaturalSpeech2_Mel.LJ/Train'
         Metadata_File: 'METADATA.PICKLE'
         Feature_Length:
             Min: 100
-            Max: 650
+            Max: 800
         Text_Length:
             Min: 1
             Max: 200
         Accumulated_Dataset_Epoch: 1 # This is to prevent slow down from torch.utils.data.DataLoader when the number of patterns is small.
         Augmentation_Ratio: 0.10
     Eval_Pattern:
-        Path: 'F:/Datasets/22K.NaturalSpeech2.LJ/Eval'
+        Path: 'F:/Datasets/22K.NaturalSpeech2_Mel.LJ/Eval'
         Metadata_File: 'METADATA.PICKLE'
         Feature_Length:
             Min: 100
-            Max: 650
+            Max: 800
         Text_Length:
             Min: 10
             Max: 200
     Num_Workers: 0
-    Batch_Size: 8
+    Batch_Size: 12
     Segment_Size: 64
     Learning_Rate:
-        Initial: 5.0e-4
+        Initial: 1.0e-4
         Warmup_Step: 32000
         CE_RVQ_Lambda: 0.1
     ADAM:
@@ -139,16 +144,16 @@ Train:
 
 Inference_Batch_Size: 16
 
-Inference_Path: './results/LJ_230602/Inference'
-Checkpoint_Path: './results/LJ_230602/Checkpoint'
-Log_Path: './results/LJ_230602/Log'
+Inference_Path: './results/LJ_230618/Inference'
+Checkpoint_Path: './results/LJ_230618/Checkpoint'
+Log_Path: './results/LJ_230618/Log'
 
 Weights_and_Biases:
     # Use: true
     Use: false
     Project: 'NaturalSpeech2'
     Entity: 'codejin'
-    Name: 'LJ_230602'
+    Name: 'LJ_230618'
     Save_Checkpoint:
         Use: false
         Interval: 50000 # Unlike local, The capacity of WandB is small.
