@@ -117,8 +117,6 @@ class Trainer:
         inference_dataset = Inference_Dataset(
             hyper_parameters= self.hp,
             token_dict= token_dict,
-            sample_rate= self.hp.Sound.Sample_Rate,
-            hop_size= self.hp.Sound.Frame_Shift,
             use_between_padding= self.hp.Duration_Predictor.Use_Between_Padding,
             texts= self.hp.Train.Inference_in_Train.Text,
             references= self.hp.Train.Inference_in_Train.Reference,

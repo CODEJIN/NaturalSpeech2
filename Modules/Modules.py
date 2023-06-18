@@ -35,7 +35,7 @@ class NaturalSpeech2(torch.nn.Module):
             condition_attenion_head= self.hp.Alignment_Learning_Framework.Condition_Attention_Head
             )
 
-        self.variance_block = Variacne_Block(self.hp)
+        self.variance_block = Variance_Block(self.hp)
 
         self.frame_prior_network = Frame_Prior_Network(self.hp)
 
@@ -91,7 +91,7 @@ class NaturalSpeech2(torch.nn.Module):
         f0s: torch.FloatTensor,
         attention_priors: torch.Tensor,
         ):
-        mels = (mels - self.mel_min) / (self.mel_max - self.mel_min)
+        mels = (mels - self.mel_min) / (self.mel_max - self.mel_min) * 2.0 - 1.0
 
         encodings = self.encoder(
             tokens= tokens,
@@ -103,7 +103,6 @@ class NaturalSpeech2(torch.nn.Module):
         durations, attention_softs, attention_hards, attention_logprobs = self.alignment_learning_framework(
             token_embeddings= self.encoder.token_embedding(tokens).permute(0, 2, 1),
             encoding_lengths= token_lengths,
-            conditions= speech_prompts,
             features= mels,
             feature_lengths= mel_lengths,
             attention_priors= attention_priors
@@ -115,14 +114,14 @@ class NaturalSpeech2(torch.nn.Module):
             speech_prompts= speech_prompts,
             durations= durations,
             f0s= f0s,
-            latent_lengths= mel_lengths
+            feature_lengths= mel_lengths
             )
         
-        encodings, linear_projections = self.frame_prior_network(
+        encodings, linear_predictions = self.frame_prior_network(
             encodings= encodings,
             lengths= mel_lengths
             )
-        encodings = torch.cat([encodings, linear_projections], dim= 1)
+        encodings = torch.cat([encodings, linear_predictions], dim= 1)
         
         encodings_slice, offsets = self.segment(
             patterns= encodings.permute(0, 2, 1),
@@ -146,7 +145,7 @@ class NaturalSpeech2(torch.nn.Module):
             )
         
         return \
-            linear_projections, None, mels_slice, noises, epsilons, duration_loss, f0_loss, \
+            linear_predictions, None, mels_slice, noises, epsilons, duration_loss, f0_loss, \
             attention_softs, attention_hards, attention_logprobs, alignments, f0s
 
     def Inference(
@@ -170,11 +169,11 @@ class NaturalSpeech2(torch.nn.Module):
             )
         mel_lengths = alignments.sum(dim= [1, 2])
         
-        encodings, linear_projections = self.frame_prior_network(
+        encodings, linear_predictions = self.frame_prior_network(
             encodings= encodings,
             lengths= mel_lengths
             )
-        encodings = torch.cat([encodings, linear_projections], dim= 1)
+        encodings = torch.cat([encodings, linear_predictions], dim= 1)
 
         if not ddim_steps is None and ddim_steps < self.hp.Diffusion.Max_Step:
             diffusion_predictions = self.diffusion.DDIM(
@@ -192,10 +191,10 @@ class NaturalSpeech2(torch.nn.Module):
                 temperature= temperature
                 )
 
-        linear_projections = linear_projections * (self.mel_max - self.mel_min) + self.mel_min
-        diffusion_predictions = diffusion_predictions * (self.mel_max - self.mel_min) + self.mel_min
+        linear_predictions = (linear_predictions + 1.0) / 2.0 * (self.mel_max - self.mel_min) + self.mel_min
+        diffusion_predictions = (diffusion_predictions + 1.0) / 2.0 * (self.mel_max - self.mel_min) + self.mel_min
         
-        return linear_projections, diffusion_predictions, alignments, f0s
+        return linear_predictions, diffusion_predictions, alignments, f0s
 
 class Phoneme_Encoder(torch.nn.Module): 
     def __init__(
@@ -209,15 +208,14 @@ class Phoneme_Encoder(torch.nn.Module):
             num_embeddings= self.hp.Tokens,
             embedding_dim= self.hp.Encoder.Size,
             )
-        embedding_variance = math.sqrt(3.0) * math.sqrt(2.0 / (self.hp.Tokens + self.hp.Encoder.Size))
-        self.token_embedding.weight.data.uniform_(-embedding_variance, embedding_variance)
-
+        torch.nn.init.kaiming_uniform_(self.token_embedding.weight)
+        
         self.blocks = torch.nn.ModuleList([
             FFT_Block(
                 channels= self.hp.Encoder.Size,
                 num_head= self.hp.Encoder.Transformer.Head,
-                feedforward_kernel_size= self.hp.Encoder.Transformer.FFN.Kernel_Size,
-                feedforward_dropout_rate= self.hp.Encoder.Transformer.FFN.Dropout_Rate,
+                ffn_kernel_size= self.hp.Encoder.Transformer.FFN.Kernel_Size,
+                dropout_rate= self.hp.Encoder.Transformer.FFN.Dropout_Rate,
                 )
             for index in range(self.hp.Encoder.Transformer.Stack)
             ])
@@ -249,8 +247,8 @@ class Frame_Prior_Network(torch.nn.Module):
             FFT_Block(
                 channels= self.hp.Encoder.Size,
                 num_head= self.hp.Encoder.Transformer.Head,
-                feedforward_kernel_size= self.hp.Encoder.Transformer.FFN.Kernel_Size,
-                feedforward_dropout_rate= self.hp.Encoder.Transformer.FFN.Dropout_Rate,
+                ffn_kernel_size= self.hp.Encoder.Transformer.FFN.Kernel_Size,
+                dropout_rate= self.hp.Encoder.Transformer.FFN.Dropout_Rate,
                 )
             for index in range(self.hp.Encoder.Transformer.Stack)
             ])
@@ -283,8 +281,8 @@ class FFT_Block(torch.nn.Module):
         self,
         channels: int,
         num_head: int,
-        feedforward_kernel_size: int,
-        feedforward_dropout_rate: float= 0.2
+        ffn_kernel_size: int,
+        dropout_rate: float= 0.1
         ) -> None:
         super().__init__()
 
@@ -298,8 +296,8 @@ class FFT_Block(torch.nn.Module):
         
         self.ffn = FFN(
             channels= channels,
-            kernel_size= feedforward_kernel_size,
-            dropout_rate= feedforward_dropout_rate
+            kernel_size= ffn_kernel_size,
+            dropout_rate= dropout_rate
             )
         
     def forward(
@@ -342,9 +340,7 @@ class FFN(torch.nn.Module):
             w_init_gain= 'relu'
             )
         self.silu = torch.nn.SiLU()
-        self.norm_0 = RMSNorm(
-            num_features= channels * 4,
-            )
+        
         self.dropout = torch.nn.Dropout(p= dropout_rate)
         self.conv_1 = Conv1d(
             in_channels= channels * 4,
@@ -353,7 +349,7 @@ class FFN(torch.nn.Module):
             padding= (kernel_size - 1) // 2,
             w_init_gain= 'linear'
             )
-        self.norm_1 = RMSNorm(
+        self.norm = RMSNorm(
             num_features= channels,
             )
         
@@ -369,11 +365,11 @@ class FFN(torch.nn.Module):
 
         x = self.conv_0(x * masks)
         x = self.silu(x)
-        x = self.norm_0(x)
+
         x = self.dropout(x)
         x = self.conv_1(x * masks)
         x = self.dropout(x)
-        x = self.norm_1(x + residuals)
+        x = self.norm(x + residuals)
 
         return x * masks
 
@@ -401,8 +397,8 @@ class Speech_Prompter(torch.nn.Module):
             FFT_Block(
                 channels= self.hp.Speech_Prompter.Size,
                 num_head= self.hp.Speech_Prompter.Transformer.Head,
-                feedforward_kernel_size= self.hp.Speech_Prompter.Transformer.FFN.Kernel_Size,
-                feedforward_dropout_rate= self.hp.Speech_Prompter.Transformer.FFN.Dropout_Rate,
+                ffn_kernel_size= self.hp.Speech_Prompter.Transformer.FFN.Kernel_Size,
+                dropout_rate= self.hp.Speech_Prompter.Transformer.FFN.Dropout_Rate,
                 )
             for index in range(self.hp.Speech_Prompter.Transformer.Stack)
             ])
@@ -432,7 +428,7 @@ class Speech_Prompter(torch.nn.Module):
         return speech_prompts
 
 
-class Variacne_Block(torch.nn.Module):
+class Variance_Block(torch.nn.Module):
     def __init__(
         self,
         hyper_parameters: Namespace
@@ -457,7 +453,7 @@ class Variacne_Block(torch.nn.Module):
         speech_prompts: torch.FloatTensor,
         durations: Optional[torch.LongTensor]= None,
         f0s: Optional[torch.FloatTensor]= None,
-        latent_lengths: Optional[torch.LongTensor]= None,
+        feature_lengths: Optional[torch.LongTensor]= None,
         ):
         duration_predictions = self.duration_predictor(
             encodings= encodings,
@@ -468,11 +464,11 @@ class Variacne_Block(torch.nn.Module):
         duration_loss = None
         if durations is None:
             durations = duration_predictions.ceil().long() # [Batch, Enc_t]
-            latent_lengths = torch.stack([
+            feature_lengths = torch.stack([
                 duration[:length - 1].sum() + 1
                 for duration, length in zip(durations, encoding_lengths)
                 ], dim= 0)
-            max_duration_sum = latent_lengths.max()
+            max_duration_sum = feature_lengths.max()
 
             for duration, length in zip(durations, encoding_lengths):
                 duration[length - 1:] = 0
@@ -485,7 +481,7 @@ class Variacne_Block(torch.nn.Module):
 
         f0_predictions = self.f0_predictor(
             encodings= encodings,
-            lengths= latent_lengths,
+            lengths= feature_lengths,
             speech_prompts= speech_prompts
             )   # [Batch, Latent_t]
 
@@ -635,11 +631,11 @@ class F0_Predictor(Variance_Predictor):
         super().__init__(
             channels= self.hp.Encoder.Size,
             condition_channels= self.hp.Speech_Prompter.Size,
-            stack= self.hp.Duration_Predictor.Stack,
-            attention_num_head= self.hp.Duration_Predictor.Attention.Head,
-            conv_kernel_size= self.hp.Duration_Predictor.Conv.Kernel_Size,
-            conv_stack_in_stack= self.hp.Duration_Predictor.Conv.Stack,
-            conv_dropout_rate= self.hp.Duration_Predictor.Conv.Dropout_Rate,
+            stack= self.hp.F0_Predictor.Stack,
+            attention_num_head= self.hp.F0_Predictor.Attention.Head,
+            conv_kernel_size= self.hp.F0_Predictor.Conv.Kernel_Size,
+            conv_stack_in_stack= self.hp.F0_Predictor.Conv.Stack,
+            conv_dropout_rate= self.hp.F0_Predictor.Conv.Dropout_Rate,
             )
 
 

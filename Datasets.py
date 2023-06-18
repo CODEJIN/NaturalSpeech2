@@ -139,8 +139,6 @@ class Inference_Dataset(torch.utils.data.Dataset):
         self,
         hyper_parameters: Namespace,
         token_dict: Dict[str, int],
-        sample_rate: int,
-        hop_size: int,
         use_between_padding: bool,
         texts: List[str],
         references: List[str]
@@ -148,8 +146,6 @@ class Inference_Dataset(torch.utils.data.Dataset):
         super().__init__()
         self.hp = hyper_parameters
         self.token_dict = token_dict
-        self.sample_rate = sample_rate
-        self.hop_size = hop_size
         self.use_between_padding = use_between_padding
 
         pronunciations = Phonemize(texts, language= 'English')
