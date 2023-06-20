@@ -135,7 +135,7 @@ class NaturalSpeech2(torch.nn.Module):
             )
         mels_slice = mels_slice.permute(0, 2, 1)
 
-        noises, epsilons  = self.diffusion(
+        noises, epsilons, starts  = self.diffusion(
             features= mels_slice,
             encodings= encodings_slice,
             lengths= torch.full_like(mel_lengths, fill_value= self.hp.Train.Segment_Size),
@@ -143,7 +143,7 @@ class NaturalSpeech2(torch.nn.Module):
             )
         
         return \
-            linear_predictions, None, mels, noises, epsilons, duration_loss, f0_loss, \
+            linear_predictions, None, mels, mels_slice, noises, epsilons, starts, duration_loss, f0_loss, \
             attention_softs, attention_hards, attention_logprobs, alignments, f0s
 
     def Inference(
@@ -458,7 +458,6 @@ class Variance_Block(torch.nn.Module):
             lengths= encoding_lengths,
             speech_prompts= speech_prompts
             )   # [Batch, Enc_t]
-
         duration_loss = None
         if durations is None:
             durations = duration_predictions.ceil().long() # [Batch, Enc_t]

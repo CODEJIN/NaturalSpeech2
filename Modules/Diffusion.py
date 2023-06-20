@@ -15,7 +15,7 @@ class Diffusion(torch.nn.Module):
         super().__init__()
         self.hp = hyper_parameters
 
-        self.denoiser = Denoiser(
+        self.network = Diffusion_Network(
             hyper_parameters= self.hp
             )
 
@@ -61,7 +61,7 @@ class Diffusion(torch.nn.Module):
             features * self.sqrt_alphas_cumprod[diffusion_steps][:, None, None] + \
             noises * self.sqrt_one_minus_alphas_cumprod[diffusion_steps][:, None, None]
 
-        epsilons = self.denoiser(
+        outputs = self.network(
             features= noised_features,
             encodings= encodings,
             lengths= lengths,
@@ -69,7 +69,21 @@ class Diffusion(torch.nn.Module):
             diffusion_steps= diffusion_steps
             )
         
-        return noises, epsilons
+        # https://github.com/openai/guided-diffusion/blob/22e0df8183507e13a7813f8d38d51b072ca1e67c/guided_diffusion/gaussian_diffusion.py#L328-L349
+        if self.hp.Diffusion.Network_Prediction.upper() == 'EPSILON':
+            epsilons = outputs
+            starts = \
+                noised_features * self.sqrt_recip_alphas_cumprod[diffusion_steps][:, None, None] - \
+                epsilons * self.sqrt_recipm1_alphas_cumprod[diffusion_steps][:, None, None]
+        elif self.hp.Diffusion.Network_Prediction.upper() == 'START':
+            starts = outputs
+            epsilons = \
+                (noised_features * self.sqrt_recip_alphas_cumprod[diffusion_steps][:, None, None] - starts) / \
+                self.sqrt_recipm1_alphas_cumprod[diffusion_steps][:, None, None]
+        else:
+            raise NotImplementedError(f'Unknown diffusion network prediction: {self.hp.Diffusion.Network_Prediction}')
+        
+        return noises, epsilons, starts
 
     def DDPM(
         self,
@@ -90,21 +104,26 @@ class Diffusion(torch.nn.Module):
                 device= encodings.device
                 )
             
-            noised_predictions = self.denoiser(
+            outputs = self.network(
                 features= features,
                 encodings= encodings,
                 lengths= lengths,
                 speech_prompts= speech_prompts,
                 diffusion_steps= diffusion_steps
                 )
-            
-            epsilons = \
-                features * self.sqrt_recip_alphas_cumprod[diffusion_steps][:, None, None] - \
-                noised_predictions * self.sqrt_recipm1_alphas_cumprod[diffusion_steps][:, None, None]
-            epsilons.clamp_(-1.0, 1.0)  # clipped
+
+            if self.hp.Diffusion.Network_Prediction.upper() == 'EPSILON':            
+                starts = \
+                    features * self.sqrt_recip_alphas_cumprod[diffusion_steps][:, None, None] - \
+                    outputs * self.sqrt_recipm1_alphas_cumprod[diffusion_steps][:, None, None]
+            elif self.hp.Diffusion.Network_Prediction.upper() == 'START':
+                starts = outputs
+            else:
+                raise NotImplementedError(f'Unknown diffusion network prediction: {self.hp.Diffusion.Network_Prediction}')
+            starts.clamp_(-1.0, 1.0)  # clipped
 
             posterior_means = \
-                epsilons * self.posterior_mean_coef1[diffusion_steps][:, None, None] + \
+                starts * self.posterior_mean_coef1[diffusion_steps][:, None, None] + \
                 features * self.posterior_mean_coef2[diffusion_steps][:, None, None]
             posterior_log_variances = \
                 self.posterior_log_variance[diffusion_steps][:, None, None]
@@ -127,38 +146,50 @@ class Diffusion(torch.nn.Module):
         ddim_timesteps = self.Get_DDIM_Steps(
             ddim_steps= ddim_steps
             )
-        sigmas, alphas, alphas_prev = self.Get_DDIM_Sampling_Parameters(
-            ddim_timesteps= ddim_timesteps,
-            eta= eta
-            )
-        sqrt_one_minus_alphas = (1. - alphas).sqrt()
 
         features = torch.randn(
             size= (encodings.size(0), self.hp.Sound.Mel_Dim, encodings.size(2)),
             device= encodings.device
             )
 
-        setp_range = reversed(range(ddim_steps))
+        for diffusion_steps in reversed(ddim_timesteps):
+            diffusion_steps = torch.full(
+                size= (encodings.size(0), ),
+                fill_value= diffusion_steps,
+                dtype= torch.long,
+                device= encodings.device
+                )
 
-        for diffusion_steps in setp_range:
-            noised_predictions = self.denoiser(
+            outputs = self.network(
                 features= features,
                 encodings= encodings,
                 lengths= lengths,
                 speech_prompts= speech_prompts,
-                diffusion_steps= torch.full(
-                    size= (encodings.size(0), ),
-                    fill_value= diffusion_steps,
-                    dtype= torch.long,
-                    device= encodings.device
-                    )
+                diffusion_steps= diffusion_steps
                 )
 
-            feature_starts = (features - sqrt_one_minus_alphas[diffusion_steps] * noised_predictions) / alphas[diffusion_steps].sqrt()
-            direction_pointings = (1.0 - alphas_prev[diffusion_steps] - sigmas[diffusion_steps].pow(2.0)) * noised_predictions
-            noises = sigmas[diffusion_steps] * torch.randn_like(features) / temperature
+            if self.hp.Diffusion.Network_Prediction.upper() == 'EPSILON':            
+                epsilons = outputs
+                starts = \
+                    features * self.sqrt_recip_alphas_cumprod[diffusion_steps][:, None, None] - \
+                    outputs * self.sqrt_recipm1_alphas_cumprod[diffusion_steps][:, None, None]
+            elif self.hp.Diffusion.Network_Prediction.upper() == 'START':
+                starts = outputs
+                epsilons = \
+                    (noised_features * self.sqrt_recip_alphas_cumprod[diffusion_steps][:, None, None] - starts) / \
+                    self.sqrt_recipm1_alphas_cumprod[diffusion_steps][:, None, None]
+            else:
+                raise NotImplementedError(f'Unknown diffusion network prediction: {self.hp.Diffusion.Network_Prediction}')
+            starts.clamp_(-1.0, 1.0)  # clipped
 
-            features = alphas_prev[diffusion_steps].sqrt() * feature_starts + direction_pointings + noises
+            alphas_cumprod = self.alphas_cumprod[diffusion_steps][:, None, None]
+            alphas_cumprod_prev = self.alphas_cumprod_prev[diffusion_steps][:, None, None]
+            sigmas = eta * ((1.0 - alphas_cumprod_prev) / (1.0 - alphas_cumprod)).sqrt() * ((1.0 - alphas_cumprod) / alphas_cumprod_prev).sqrt()
+
+            noises = torch.randn_like(features) / temperature # [Batch, Feature_d, Feature_d]
+            masks = (diffusion_steps > 0).float().unsqueeze(1).unsqueeze(1) # [Batch, 1, 1]
+            features = starts * alphas_cumprod_prev.sqrt() + (1.0 - alphas_cumprod_prev - sigmas ** 2).sqrt() * epsilons
+            features = features + masks * sigmas * noises
 
         return features
 
@@ -177,17 +208,10 @@ class Diffusion(torch.nn.Module):
         
         ddim_timesteps[-1] = self.hp.Diffusion.Max_Step - 1
 
-        return ddim_timesteps
-
-    def Get_DDIM_Sampling_Parameters(self, ddim_timesteps, eta):
-        alphas = self.alphas_cumprod[ddim_timesteps]
-        alphas_prev = self.alphas_cumprod_prev[ddim_timesteps]
-        sigmas = eta * ((1 - alphas_prev) / (1 - alphas) * (1 - alphas / alphas_prev)).sqrt()
-
-        return sigmas, alphas, alphas_prev
+        return list(reversed(ddim_timesteps))
 
 
-class Denoiser(torch.nn.Module):
+class Diffusion_Network(torch.nn.Module):
     def __init__(
         self,
         hyper_parameters: Namespace

@@ -183,10 +183,9 @@ class Inference_Dataset(torch.utils.data.Dataset):
             hop_size= self.hp.Sound.Frame_Shift,
             win_size= self.hp.Sound.Frame_Length,
             fmin= self.hp.Sound.Mel_F_Min,
-            fmax= self.hp.Sound.Mel_F_Min,
+            fmax= self.hp.Sound.Mel_F_Max,
             center= False
             ).squeeze(0).numpy()
-
 
         return token, speech_prompt_mel, text, pronunciation, reference
 

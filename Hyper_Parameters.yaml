@@ -71,6 +71,8 @@ Diffusion:
         Attention:
             Apply_in_Stack: 3
             Head: 2
+    Network_Prediction: 'Start'   # 'Epsilon'
+            
 
 Token_Path: 'F:/Datasets/22K.NaturalSpeech2_Mel.LJ/Token.yaml'
 Mel_Info_Path: 'F:/Datasets/22K.NaturalSpeech2_Mel.LJ/Mel_Info.yaml'
@@ -140,16 +142,16 @@ Train:
 
 Inference_Batch_Size: 16
 
-Inference_Path: './results/LJ_230618/Inference'
-Checkpoint_Path: './results/LJ_230618/Checkpoint'
-Log_Path: './results/LJ_230618/Log'
+Inference_Path: './results/LJ_230620/Inference'
+Checkpoint_Path: './results/LJ_230620/Checkpoint'
+Log_Path: './results/LJ_230620/Log'
 
 Weights_and_Biases:
     # Use: true
     Use: false
     Project: 'NaturalSpeech2'
     Entity: 'codejin'
-    Name: 'LJ_230618'
+    Name: 'LJ_230620'
     Save_Checkpoint:
         Use: false
         Interval: 50000 # Unlike local, The capacity of WandB is small.

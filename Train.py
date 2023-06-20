@@ -207,7 +207,7 @@ class Trainer:
         attention_priors = attention_priors.to(self.device, non_blocking=True)
 
         with torch.cuda.amp.autocast(enabled= self.hp.Use_Mixed_Precision):
-            linear_projections, _, mels_compressed, noises, epsilons, duration_loss, f0_loss, \
+            linear_projections, _, mels_compressed, mels_compressed_slice, noises, epsilons, starts, duration_loss, f0_loss, \
             attention_softs, attention_hards, attention_logprobs, alignments, f0s = self.model(
                 tokens= tokens,
                 token_lengths= token_lengths,
@@ -233,6 +233,10 @@ class Trainer:
                     linear_projections.float(),
                     mels_compressed,
                     ) * mel_masks.unsqueeze(1)).mean(dim= 1).sum() / mel_masks.sum()
+                loss_dict['Data'] = self.criterion_dict['MSE'](
+                    starts.float(),
+                    mels_compressed_slice,
+                    ).mean()
                 loss_dict['Diffusion'] = self.criterion_dict['MSE'](
                     epsilons.float(),
                     noises,
@@ -341,7 +345,7 @@ class Trainer:
         attention_priors = attention_priors.to(self.device, non_blocking=True)
 
         with torch.cuda.amp.autocast(enabled= self.hp.Use_Mixed_Precision):
-            linear_projections, _, mels_compressed, noises, epsilons, duration_loss, f0_loss, \
+            linear_projections, _, mels_compressed, mels_compressed_slice, noises, epsilons, starts, duration_loss, f0_loss, \
             attention_softs, attention_hards, attention_logprobs, alignments, f0s = self.model(
                 tokens= tokens,
                 token_lengths= token_lengths,
@@ -367,6 +371,10 @@ class Trainer:
                     linear_projections,
                     mels_compressed,
                     ) * mel_masks.unsqueeze(1)).sum() / mel_masks.sum()
+                loss_dict['Data'] = self.criterion_dict['MSE'](
+                    starts,
+                    mels_compressed_slice,
+                    ).mean()
                 loss_dict['Diffusion'] = self.criterion_dict['MSE'](
                     epsilons,
                     noises,
@@ -415,7 +423,7 @@ class Trainer:
             index = np.random.randint(0, tokens.size(0))
 
             with torch.inference_mode():
-                linear_projections, diffusion_predictions, prediction_alignments, prediction_f0s = self.model(
+                linear_projections, diffusion_predictions, prediction_alignments, prediction_f0s = self.model.Inference(
                     tokens= tokens[index].unsqueeze(0).to(self.device),
                     token_lengths= token_lengths[index].unsqueeze(0).to(self.device),
                     speech_prompts= speech_prompts[index].unsqueeze(0).to(self.device),
