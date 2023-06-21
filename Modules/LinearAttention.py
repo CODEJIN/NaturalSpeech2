@@ -2,7 +2,7 @@ import torch
 from typing import Optional
 from einops import rearrange, einsum
 
-from .Layer import Conv1d, RMSNorm, Lambda
+from .Layer import Conv1d, LayerNorm, Lambda
 
 class LinearAttention(torch.nn.Module):
     def __init__(
@@ -27,7 +27,7 @@ class LinearAttention(torch.nn.Module):
                 kernel_size= 1,
                 w_init_gain= 'linear'
                 ),
-            RMSNorm(num_features= calc_channels),
+            LayerNorm(num_features= calc_channels),
             Lambda(lambda x: torch.nn.functional.elu(x) + 1.0)
             )
         self.key = torch.nn.Sequential(
@@ -37,7 +37,7 @@ class LinearAttention(torch.nn.Module):
                 kernel_size= 1,
                 w_init_gain= 'linear'
                 ),
-            RMSNorm(num_features= calc_channels),
+            LayerNorm(num_features= calc_channels),
             Lambda(lambda x: torch.nn.functional.elu(x) + 1.0)
             )
         self.value = torch.nn.Sequential(
@@ -47,7 +47,7 @@ class LinearAttention(torch.nn.Module):
                 kernel_size= 1,
                 w_init_gain= 'linear'
                 ),
-            RMSNorm(num_features= calc_channels),
+            LayerNorm(num_features= calc_channels),
             Lambda(lambda x: torch.nn.functional.elu(x) + 1.0)
             )
         
@@ -58,7 +58,7 @@ class LinearAttention(torch.nn.Module):
             w_init_gain= 'linear'
             )
         
-        self.norm = RMSNorm(num_features= query_channels)
+        self.norm = LayerNorm(num_features= query_channels)
 
 
     def forward(

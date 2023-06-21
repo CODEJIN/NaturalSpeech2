@@ -10,7 +10,7 @@ from random import sample
 from .Nvidia_Alignment_Learning_Framework import Alignment_Learning_Framework
 from .Diffusion import Diffusion
 from .LinearAttention import LinearAttention
-from .Layer import Conv1d, RMSNorm
+from .Layer import Conv1d, LayerNorm
 
 
 class NaturalSpeech2(torch.nn.Module):
@@ -347,7 +347,7 @@ class FFN(torch.nn.Module):
             padding= (kernel_size - 1) // 2,
             w_init_gain= 'linear'
             )
-        self.norm = RMSNorm(
+        self.norm = LayerNorm(
             num_features= channels,
             )
         
@@ -387,7 +387,7 @@ class Speech_Prompter(torch.nn.Module):
                 kernel_size= 1,
                 w_init_gain= 'relu'
                 ),
-            RMSNorm(num_features= self.hp.Speech_Prompter.Size),
+            LayerNorm(num_features= self.hp.Speech_Prompter.Size),
             torch.nn.SiLU()
             )
         
@@ -533,7 +533,7 @@ class Variance_Predictor(torch.nn.Module):
                     padding= (conv_kernel_size - 1) // 2,
                     w_init_gain= 'relu'
                     ))
-                conv.append(RMSNorm(num_features= channels))
+                conv.append(LayerNorm(num_features= channels))
                 conv.append(torch.nn.SiLU())
                 conv.append(torch.nn.Dropout(p= conv_dropout_rate))
                 conv_block.append(conv)
