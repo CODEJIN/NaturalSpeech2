@@ -10,6 +10,7 @@ Sound:
     F0_Max: 880
 
 Tokens: 55
+Use_Between_Padding: true
 
 Encoder:
     Size: 384
@@ -37,7 +38,6 @@ Duration_Predictor:
         Kernel_Size: 3
         Stack: 3
         Dropout_Rate: 0.2
-    Use_Between_Padding: true
 
 F0_Predictor:
     Stack: 10
@@ -89,7 +89,7 @@ Train:
         Path: 'F:/Datasets/22K.NaturalSpeech2_Mel.LJ/Train'
         Metadata_File: 'METADATA.PICKLE'
         Feature_Length:
-            Min: 100
+            Min: 50
             Max: 800
         Text_Length:
             Min: 1
@@ -100,22 +100,21 @@ Train:
         Path: 'F:/Datasets/22K.NaturalSpeech2_Mel.LJ/Eval'
         Metadata_File: 'METADATA.PICKLE'
         Feature_Length:
-            Min: 100
+            Min: 50
             Max: 800
         Text_Length:
             Min: 10
             Max: 200
     Num_Workers: 0
-    Batch_Size: 12
+    Batch_Size: 12  # 16
     Segment_Size: 64
     Learning_Rate:
         Initial: 1.0e-4
         Warmup_Step: 4000
-        CE_RVQ_Lambda: 0.1
     ADAM:
         Beta1: 0.9
         Beta2: 0.999
-        Epsilon: 1.0e-9
+        Epsilon: 1.0e-7
     Accumulated_Gradient_Step: 1 # 25
     Gradient_Norm: 0.0
     Max_Step: 1000000

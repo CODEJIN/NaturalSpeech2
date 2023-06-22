@@ -152,7 +152,7 @@ class NaturalSpeech2(torch.nn.Module):
         token_lengths: torch.LongTensor,
         speech_prompts: torch.FloatTensor,
         ddim_steps: Optional[int]= None,
-        temperature: Optional[float]= 1.2 ** 2    # ignore now
+        temperature: Optional[float]= 1.0 # 1.2 ** 2
         ):
         encodings = self.encoder(
             tokens= tokens,
@@ -173,21 +173,28 @@ class NaturalSpeech2(torch.nn.Module):
             )
         encodings = torch.cat([encodings, linear_predictions], dim= 1)
 
-        if not ddim_steps is None and ddim_steps < self.hp.Diffusion.Max_Step:
-            diffusion_predictions = self.diffusion.DDIM(
-                encodings= encodings,
-                lengths= mel_lengths,
-                speech_prompts= speech_prompts,
-                ddim_steps= ddim_steps,
-                temperature= temperature
-                )        
-        else:
-            diffusion_predictions = self.diffusion.DDPM(
-                encodings= encodings,
-                lengths= mel_lengths,
-                speech_prompts= speech_prompts,
-                temperature= temperature
-                )
+        # if not ddim_steps is None and ddim_steps < self.hp.Diffusion.Max_Step:
+        #     diffusion_predictions = self.diffusion.DDIM(
+        #         encodings= encodings,
+        #         lengths= mel_lengths,
+        #         speech_prompts= speech_prompts,
+        #         ddim_steps= ddim_steps,
+        #         temperature= temperature
+        #         )        
+        # else:
+        #     diffusion_predictions = self.diffusion.DDPM(
+        #         encodings= encodings,
+        #         lengths= mel_lengths,
+        #         speech_prompts= speech_prompts,
+        #         temperature= temperature
+        #         )
+        diffusion_predictions = self.diffusion.DDIM(
+            encodings= encodings,
+            lengths= mel_lengths,
+            speech_prompts= speech_prompts,
+            ddim_steps= ddim_steps,
+            temperature= temperature
+            )
 
         linear_predictions = (linear_predictions + 1.0) / 2.0 * (self.mel_max - self.mel_min) + self.mel_min
         diffusion_predictions = (diffusion_predictions + 1.0) / 2.0 * (self.mel_max - self.mel_min) + self.mel_min
@@ -244,11 +251,11 @@ class Frame_Prior_Network(torch.nn.Module):
         self.blocks = torch.nn.ModuleList([
             FFT_Block(
                 channels= self.hp.Encoder.Size,
-                num_head= self.hp.Encoder.Transformer.Head,
-                ffn_kernel_size= self.hp.Encoder.Transformer.FFN.Kernel_Size,
-                dropout_rate= self.hp.Encoder.Transformer.FFN.Dropout_Rate,
+                num_head= self.hp.Frame_Prior_Network.Transformer.Head,
+                ffn_kernel_size= self.hp.Frame_Prior_Network.Transformer.FFN.Kernel_Size,
+                dropout_rate= self.hp.Frame_Prior_Network.Transformer.FFN.Dropout_Rate,
                 )
-            for index in range(self.hp.Encoder.Transformer.Stack)
+            for index in range(self.hp.Frame_Prior_Network.Transformer.Stack)
             ])
         
         self.projection = Conv1d(

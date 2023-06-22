@@ -91,7 +91,7 @@ class Trainer:
         train_dataset = Dataset(
             token_dict= token_dict,
             f0_info_dict= f0_info_dict,
-            use_between_padding= self.hp.Duration_Predictor.Use_Between_Padding,
+            use_between_padding= self.hp.Use_Between_Padding,
             pattern_path= self.hp.Train.Train_Pattern.Path,
             metadata_file= self.hp.Train.Train_Pattern.Metadata_File,
             mel_length_min= max(self.hp.Train.Train_Pattern.Feature_Length.Min, self.hp.Train.Segment_Size),
@@ -105,7 +105,7 @@ class Trainer:
         eval_dataset = Dataset(
             token_dict= token_dict,
             f0_info_dict= f0_info_dict,
-            use_between_padding= self.hp.Duration_Predictor.Use_Between_Padding,
+            use_between_padding= self.hp.Use_Between_Padding,
             pattern_path= self.hp.Train.Eval_Pattern.Path,
             metadata_file= self.hp.Train.Eval_Pattern.Metadata_File,
             mel_length_min= max(self.hp.Train.Train_Pattern.Feature_Length.Min, self.hp.Train.Segment_Size),
@@ -117,7 +117,7 @@ class Trainer:
         inference_dataset = Inference_Dataset(
             hyper_parameters= self.hp,
             token_dict= token_dict,
-            use_between_padding= self.hp.Duration_Predictor.Use_Between_Padding,
+            use_between_padding= self.hp.Use_Between_Padding,
             texts= self.hp.Train.Inference_in_Train.Text,
             references= self.hp.Train.Inference_in_Train.Reference,
             )
