@@ -19,26 +19,28 @@ class Diffusion(torch.nn.Module):
             hyper_parameters= self.hp
             )
 
-        betas = torch.linspace(1e-4, 0.06, self.hp.Diffusion.Max_Step)
+        scale = 1000 / self.hp.Diffusion.Max_Step
+        beta_start, beta_end = scale * 0.0001, scale * 0.02
+        betas = torch.linspace(beta_start, beta_end, self.hp.Diffusion.Max_Step, dtype=torch.double)
         alphas = 1.0 - betas
         alphas_cumprod = torch.cumprod(alphas, axis= 0)
         alphas_cumprod_prev = torch.cat([torch.tensor([1.0]), alphas_cumprod[:-1]])
         
         # calculations for diffusion q(x_t | x_{t-1}) and others
-        self.register_buffer('alphas_cumprod', alphas_cumprod)  # [Diffusion_t]
-        self.register_buffer('alphas_cumprod_prev', alphas_cumprod_prev)  # [Diffusion_t]
-        self.register_buffer('sqrt_alphas_cumprod', alphas_cumprod.sqrt())
-        self.register_buffer('sqrt_one_minus_alphas_cumprod', (1.0 - alphas_cumprod).sqrt())
-        self.register_buffer('sqrt_recip_alphas_cumprod', (1.0 / alphas_cumprod).sqrt())
-        self.register_buffer('sqrt_recipm1_alphas_cumprod', (1.0 / alphas_cumprod - 1.0).sqrt())
+        self.register_buffer('alphas_cumprod', alphas_cumprod.float())  # [Diffusion_t]
+        self.register_buffer('alphas_cumprod_prev', alphas_cumprod_prev.float())  # [Diffusion_t]
+        self.register_buffer('sqrt_alphas_cumprod', alphas_cumprod.sqrt().float())
+        self.register_buffer('sqrt_one_minus_alphas_cumprod', (1.0 - alphas_cumprod).sqrt().float())
+        self.register_buffer('sqrt_recip_alphas_cumprod', (1.0 / alphas_cumprod).sqrt().float())
+        self.register_buffer('sqrt_recipm1_alphas_cumprod', (1.0 / alphas_cumprod - 1.0).sqrt().float())
 
         # calculations for posterior q(x_{t-1} | x_t, x_0)
         posterior_variance = betas * (1.0 - alphas_cumprod_prev) / (1.0 - alphas_cumprod)
 
         # below: log calculation clipped because the posterior variance is 0 at the beginning of the diffusion chain
-        self.register_buffer('posterior_log_variance', torch.maximum(posterior_variance, torch.tensor([1e-20])).log())
-        self.register_buffer('posterior_mean_coef1', betas * alphas_cumprod_prev.sqrt() / (1.0 - alphas_cumprod))
-        self.register_buffer('posterior_mean_coef2', (1.0 - alphas_cumprod_prev) * alphas.sqrt() / (1.0 - alphas_cumprod))
+        self.register_buffer('posterior_log_variance', torch.maximum(posterior_variance, torch.tensor([1e-20])).log().float())
+        self.register_buffer('posterior_mean_coef1', (betas * alphas_cumprod_prev.sqrt() / (1.0 - alphas_cumprod)).float())
+        self.register_buffer('posterior_mean_coef2', ((1.0 - alphas_cumprod_prev) * alphas.sqrt() / (1.0 - alphas_cumprod)).float())
 
     def forward(
         self,

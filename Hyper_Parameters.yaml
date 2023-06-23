@@ -57,7 +57,7 @@ Frame_Prior_Network:
             Dropout_Rate: 0.1
 
 Diffusion:
-    Max_Step: 100
+    Max_Step: 1000
     Size: 256
     Pre_Attention:
         Query_Token: 32
@@ -141,16 +141,16 @@ Train:
 
 Inference_Batch_Size: 16
 
-Inference_Path: './results/LJ_230622/Inference'
-Checkpoint_Path: './results/LJ_230622/Checkpoint'
-Log_Path: './results/LJ_230622/Log'
+Inference_Path: './results/LJ_230623/Inference'
+Checkpoint_Path: './results/LJ_230623/Checkpoint'
+Log_Path: './results/LJ_230623/Log'
 
 Weights_and_Biases:
     # Use: true
     Use: false
     Project: 'NaturalSpeech2'
     Entity: 'codejin'
-    Name: 'LJ_230622'
+    Name: 'LJ_230623'
     Save_Checkpoint:
         Use: false
         Interval: 50000 # Unlike local, The capacity of WandB is small.

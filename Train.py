@@ -249,6 +249,7 @@ class Trainer:
         self.optimizer.zero_grad()
         self.scaler.scale(
             loss_dict['Linear'] +
+            loss_dict['Data'] / max(starts.max(), 1.0) +
             loss_dict['Diffusion'] +
             loss_dict['Duration'] +
             loss_dict['F0'] +
