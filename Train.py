@@ -84,7 +84,7 @@ class Trainer:
 
     def Dataset_Generate(self):
         token_dict = yaml.load(open(self.hp.Token_Path, 'r', encoding= 'utf-8-sig'), Loader=yaml.Loader)
-        latent_info_dict = yaml.load(open(self.hp.Mel_Info_Path, 'r'), Loader=yaml.Loader)
+        latent_info_dict = yaml.load(open(self.hp.Latent_Info_Path, 'r'), Loader=yaml.Loader)
         self.latent_min = min([x['Min'] for x in latent_info_dict.values()]) / len(latent_info_dict)
         self.latent_max = max([x['Max'] for x in latent_info_dict.values()]) / len(latent_info_dict)
         f0_info_dict = yaml.load(open(self.hp.F0_Info_Path, 'r'), Loader=yaml.Loader)
@@ -456,9 +456,9 @@ class Trainer:
             target_audio_length = target_latent_length * self.hp.Sound.Frame_Shift
             prediction_audio_length = prediction_latent_length * self.hp.Sound.Frame_Shift
 
-            target_audio = (target_audios[0, :target_audio_length].float() / 32768.0).clamp(-1.0, 1.0)
-            linear_prediction_audio = (linear_projections[0, :prediction_audio_length].float() / 32768.0).clamp(-1.0, 1.0)
-            diffusion_prediction_audio = (diffusion_predictions[0, :prediction_audio_length].float() / 32768.0).clamp(-1.0, 1.0)
+            target_audio = target_audios[0, :target_audio_length].float().clamp(-1.0, 1.0)
+            linear_prediction_audio = linear_projections[0, :prediction_audio_length].float().clamp(-1.0, 1.0)
+            diffusion_prediction_audio = diffusion_predictions[0, :prediction_audio_length].float().clamp(-1.0, 1.0)
 
             target_mel = self.mel_func(target_audio[None])[0, :,  :target_latent_length].cpu().numpy()
             linear_prediction_mel = self.mel_func(linear_prediction_audio[None])[0, :,  :prediction_latent_length].cpu().numpy()
