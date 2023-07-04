@@ -3,6 +3,7 @@ import torch
 import numpy as np
 import math
 from typing import Optional, Union, Tuple
+from encodec import EncodecModel
 
 from .Nvidia_Alignment_Learning_Framework import Alignment_Learning_Framework
 from .Diffusion import Diffusion
@@ -14,13 +15,13 @@ class NaturalSpeech2(torch.nn.Module):
     def __init__(
         self,
         hyper_parameters: Namespace,
-        mel_min: float,
-        mel_max: float,
+        latent_min: float,
+        latent_max: float,
         ):
         super().__init__()
         self.hp = hyper_parameters
-        self.mel_min = mel_min
-        self.mel_max = mel_max
+        self.latent_min = latent_min
+        self.latent_max = latent_max
 
         self.encoder = Encoder(self.hp)
         self.speech_prompter = Speech_Prompter(self.hp)
@@ -36,6 +37,8 @@ class NaturalSpeech2(torch.nn.Module):
 
         self.diffusion = Diffusion(self.hp)
 
+        self.encodec = EncodecModel.encodec_model_24khz()
+
         self.segment = Segment()
 
     def forward(
@@ -44,17 +47,19 @@ class NaturalSpeech2(torch.nn.Module):
         token_lengths: torch.LongTensor,
         speech_prompts: torch.FloatTensor,
         speech_prompts_for_diffusion: Optional[torch.FloatTensor]= None,
-        mels: Optional[torch.LongTensor]= None,
-        mel_lengths: Optional[torch.LongTensor]= None,
+        latents: Optional[torch.LongTensor]= None,
+        latent_lengths: Optional[torch.LongTensor]= None,
         f0s: Optional[torch.FloatTensor]= None,
+        mels: Optional[torch.LongTensor]= None,
         attention_priors: Optional[torch.FloatTensor]= None,
         ddim_steps: Optional[int]= None
         ):
         if all([
             not speech_prompts_for_diffusion is None,
-            not mels is None,
-            not mel_lengths is None,
+            not latents is None,
+            not latent_lengths is None,
             not f0s is None,
+            not mels is None,
             not attention_priors is None
             ]):    # train
             return self.Train(
@@ -62,9 +67,10 @@ class NaturalSpeech2(torch.nn.Module):
                 token_lengths= token_lengths,
                 speech_prompts= speech_prompts,
                 speech_prompts_for_diffusion= speech_prompts_for_diffusion,
-                mels= mels,
-                mel_lengths= mel_lengths,
+                latents= latents,
+                latent_lengths= latent_lengths,
                 f0s= f0s,
+                mels= mels,
                 attention_priors= attention_priors
                 )
         else:   #  inference
@@ -79,14 +85,20 @@ class NaturalSpeech2(torch.nn.Module):
         self,
         tokens: torch.LongTensor,
         token_lengths: torch.LongTensor,
-        speech_prompts: torch.FloatTensor,
+        speech_prompts: torch.LongTensor,
         speech_prompts_for_diffusion: torch.LongTensor,
-        mels: torch.Tensor,
-        mel_lengths: torch.LongTensor,
+        latents: torch.LongTensor,
+        latent_lengths: torch.LongTensor,
         f0s: torch.FloatTensor,
+        mels: torch.Tensor,
         attention_priors: torch.Tensor,
         ):
-        mels = (mels - self.mel_min) / (self.mel_max - self.mel_min) * 2.0 - 1.0
+        latent_codes = latents
+        with torch.no_grad():
+            latents = self.encodec.quantizer.decode(latents.permute(1, 0, 2))
+            latents = (latents - self.latent_min) / (self.latent_max - self.latent_min) * 2.0 - 1.0
+            speech_prompts = self.encodec.quantizer.decode(speech_prompts.permute(1, 0, 2))
+            speech_prompts_for_diffusion = self.encodec.quantizer.decode(speech_prompts_for_diffusion.permute(1, 0, 2))
 
         encodings = self.encoder(
             tokens= tokens,
@@ -99,7 +111,7 @@ class NaturalSpeech2(torch.nn.Module):
             token_embeddings= self.encoder.token_embedding(tokens).permute(0, 2, 1),
             encoding_lengths= token_lengths,
             features= mels,
-            feature_lengths= mel_lengths,
+            feature_lengths= latent_lengths,
             attention_priors= attention_priors
             )
 
@@ -109,64 +121,65 @@ class NaturalSpeech2(torch.nn.Module):
             speech_prompts= speech_prompts,
             durations= durations,
             f0s= f0s,
-            feature_lengths= mel_lengths
+            feature_lengths= latent_lengths
             )
         
         encodings, linear_predictions = self.frame_prior_network(
             encodings= encodings,
-            lengths= mel_lengths
+            lengths= latent_lengths
             )
         encodings = torch.cat([encodings, linear_predictions], dim= 1)
         
         encodings_slice, offsets = self.segment(
             patterns= encodings.permute(0, 2, 1),
             segment_size= self.hp.Train.Segment_Size,
-            lengths= mel_lengths
+            lengths= latent_lengths
             )
         encodings_slice = encodings_slice.permute(0, 2, 1)
-        
-        mels_slice, _ = self.segment(
-            patterns= mels.permute(0, 2, 1),
+
+        latents_slice, _ = self.segment(
+            patterns= latents.permute(0, 2, 1),
             segment_size= self.hp.Train.Segment_Size,
             offsets= offsets
             )
-        mels_slice = mels_slice.permute(0, 2, 1)
+        latents_slice = latents_slice.permute(0, 2, 1)
 
-        noises, epsilons, starts  = self.diffusion(
-            features= mels_slice,
+        noises, epsilons, starts = self.diffusion(
+            features= latents_slice,
             encodings= encodings_slice,
-            lengths= torch.full_like(mel_lengths, fill_value= self.hp.Train.Segment_Size),
+            lengths= torch.full_like(latent_lengths, fill_value= self.hp.Train.Segment_Size),
             speech_prompts= speech_prompts_for_diffusion,            
             )
         
         return \
-            linear_predictions, None, mels, mels_slice, noises, epsilons, starts, duration_loss, f0_loss, \
+            linear_predictions, None, latents, latents_slice, noises, epsilons, starts, duration_loss, f0_loss, \
             attention_softs, attention_hards, attention_logprobs, alignments, f0s
 
     def Inference(
         self,
         tokens: torch.LongTensor,
         token_lengths: torch.LongTensor,
-        speech_prompts: torch.FloatTensor,
+        speech_prompts: torch.LongTensor,
         ddim_steps: Optional[int]= None,
         temperature: Optional[float]= 1.0 # 1.2 ** 2
         ):
+        speech_prompts = self.encodec.quantizer.decode(speech_prompts.permute(1, 0, 2))
         encodings = self.encoder(
             tokens= tokens,
             lengths= token_lengths
             )
         speech_prompts = self.speech_prompter(speech_prompts)
-        
+
         encodings, _, _, alignments, f0s = self.variance_block(
             encodings= encodings,
             encoding_lengths= token_lengths,
             speech_prompts= speech_prompts,
             )
-        mel_lengths = alignments.sum(dim= [1, 2])
+        latent_lengths = alignments.sum(dim= [1, 2])
         
         encodings, linear_predictions = self.frame_prior_network(
             encodings= encodings,
-            lengths= mel_lengths
+            lengths= latent_lengths
             )
         encodings = torch.cat([encodings, linear_predictions], dim= 1)
 
@@ -187,16 +200,37 @@ class NaturalSpeech2(torch.nn.Module):
         #         )
         diffusion_predictions = self.diffusion.DDIM(
             encodings= encodings,
-            lengths= mel_lengths,
+            lengths= latent_lengths,
             speech_prompts= speech_prompts,
             ddim_steps= ddim_steps,
             temperature= temperature
             )
 
-        linear_predictions = (linear_predictions + 1.0) / 2.0 * (self.mel_max - self.mel_min) + self.mel_min
-        diffusion_predictions = (diffusion_predictions + 1.0) / 2.0 * (self.mel_max - self.mel_min) + self.mel_min
+        linear_predictions = (linear_predictions + 1.0) / 2.0 * (self.latent_max - self.latent_min) + self.latent_min
+        diffusion_predictions = (diffusion_predictions + 1.0) / 2.0 * (self.latent_max - self.latent_min) + self.latent_min
+
+        # Performing VQ to correct the incomplete predictions of diffusion.
+        linear_predictions = self.encodec.quantizer.encode(
+            x= linear_predictions,
+            sample_rate= self.encodec.frame_rate,
+            bandwidth= self.encodec.bandwidth
+            )
+        linear_predictions = self.encodec.quantizer.decode(linear_predictions)
+        linear_predictions = self.encodec.decoder(linear_predictions).squeeze(1)  # [Batch, Audio_t]
+
+        diffusion_predictions = self.encodec.quantizer.encode(
+            x= diffusion_predictions,
+            sample_rate= self.encodec.frame_rate,
+            bandwidth= self.encodec.bandwidth
+            )
+        diffusion_predictions = self.encodec.quantizer.decode(diffusion_predictions)
+        diffusion_predictions = self.encodec.decoder(diffusion_predictions).squeeze(1)  # [Batch, Audio_t]
         
         return linear_predictions, diffusion_predictions, alignments, f0s
+    
+    def train(self, mode: bool= True):
+        super().train(mode= mode)
+        self.encodec.eval() # encodec is always eval mode.
 
 class Encoder(torch.nn.Module): 
     def __init__(
@@ -257,7 +291,7 @@ class Frame_Prior_Network(torch.nn.Module):
         
         self.projection = Conv1d(
             in_channels= self.hp.Encoder.Size,
-            out_channels= self.hp.Sound.Mel_Dim,
+            out_channels= self.hp.Audio_Codec_Size,
             kernel_size= 1,
             w_init_gain= 'linear'
             )
@@ -386,7 +420,7 @@ class Speech_Prompter(torch.nn.Module):
 
         self.prenet = torch.nn.Sequential(
             Conv1d(
-                in_channels= self.hp.Sound.Mel_Dim,
+                in_channels= self.hp.Audio_Codec_Size,
                 out_channels= self.hp.Speech_Prompter.Size,
                 kernel_size= 1,
                 w_init_gain= 'relu'

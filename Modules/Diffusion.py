@@ -95,7 +95,7 @@ class Diffusion(torch.nn.Module):
         temperature: Optional[float]= 1.2 ** 2
         ):
         features = torch.randn(
-            size= (encodings.size(0), self.hp.Sound.Mel_Dim, encodings.size(2)),
+            size= (encodings.size(0), self.hp.Audio_Codec_Size, encodings.size(2)),
             device= encodings.device
             )
         for diffusion_steps in reversed(range(self.hp.Diffusion.Max_Step)):
@@ -150,7 +150,7 @@ class Diffusion(torch.nn.Module):
     #         )
 
     #     features = torch.randn(
-    #         size= (encodings.size(0), self.hp.Sound.Mel_Dim, encodings.size(2)),
+    #         size= (encodings.size(0), self.hp.Audio_Codec_Size, encodings.size(2)),
     #         device= encodings.device
     #         )
 
@@ -231,7 +231,7 @@ class Diffusion(torch.nn.Module):
         sqrt_one_minus_alphas = (1. - alphas).sqrt()
 
         features = torch.randn(
-            size= (encodings.size(0), self.hp.Sound.Mel_Dim, encodings.size(2)),
+            size= (encodings.size(0), self.hp.Audio_Codec_Size, encodings.size(2)),
             device= encodings.device
             )
 
@@ -293,7 +293,7 @@ class Diffusion_Network(torch.nn.Module):
 
         self.prenet = torch.nn.Sequential(
             Conv1d(
-                in_channels= self.hp.Sound.Mel_Dim,
+                in_channels= self.hp.Audio_Codec_Size,
                 out_channels= self.hp.Diffusion.Size,
                 kernel_size= 1,
                 w_init_gain= 'relu'
@@ -303,7 +303,7 @@ class Diffusion_Network(torch.nn.Module):
 
         self.encoding_ffn = torch.nn.Sequential(
             Conv1d(
-                in_channels= self.hp.Encoder.Size + self.hp.Sound.Mel_Dim,
+                in_channels= self.hp.Encoder.Size + self.hp.Audio_Codec_Size,
                 out_channels= self.hp.Encoder.Size * 4,
                 kernel_size= 1,
                 w_init_gain= 'relu'
@@ -370,7 +370,7 @@ class Diffusion_Network(torch.nn.Module):
             torch.nn.SiLU(),
             Conv1d(
                 in_channels= self.hp.Diffusion.Size,
-                out_channels= self.hp.Sound.Mel_Dim,
+                out_channels= self.hp.Audio_Codec_Size,
                 kernel_size= 1,
                 w_init_gain= 'zero'
                 )

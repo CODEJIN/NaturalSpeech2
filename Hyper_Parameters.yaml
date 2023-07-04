@@ -1,16 +1,13 @@
 Sound:
-    N_FFT: 1024
-    Mel_Dim: 80
-    Frame_Length: 1024
-    Frame_Shift: 256
+    Frame_Shift: 320
     Sample_Rate: 22050
-    Mel_F_Min: 0
-    Mel_F_Max: 8000
-    F0_Min: 50
-    F0_Max: 880
+    Mel_Dim: 80
+    F0_Min: 65
+    F0_Max: 2094
 
 Tokens: 55
 Use_Between_Padding: true
+Audio_Codec_Size: 128
 
 Encoder:
     Size: 384
@@ -74,19 +71,20 @@ Diffusion:
     Network_Prediction: 'Epsilon'   # 'Start', 'Epsilon'
             
 
-Token_Path: 'F:/Datasets/22K.NaturalSpeech2_Mel.LJ/Token.yaml'
-Mel_Info_Path: 'F:/Datasets/22K.NaturalSpeech2_Mel.LJ/Mel_Info.yaml'
-F0_Info_Path: 'F:/Datasets/22K.NaturalSpeech2_Mel.LJ/F0_Info.yaml'
-Speaker_Info_Path: 'F:/Datasets/22K.NaturalSpeech2_Mel.LJ/Speaker_Info.yaml'
-Emotion_Info_Path: 'F:/Datasets/22K.NaturalSpeech2_Mel.LJ/Emotion_Info.yaml'
-Language_Info_Path: 'F:/Datasets/22K.NaturalSpeech2_Mel.LJ/Language_Info.yaml'
-Gender_Info_Path: 'F:/Datasets/22K.NaturalSpeech2_Mel.LJ/Gender_Info.yaml'
-Language_and_Gender_Info_by_Speaker_Path: 'F:/Datasets/22K.NaturalSpeech2_Mel.LJ/Language_and_Gender_Info_by_Speaker.yaml'
+Token_Path: 'F:/Datasets/22K.NaturalSpeech2_Latent.LJ/Token.yaml'
+Latent_Info_Path: 'F:/Datasets/22K.NaturalSpeech2_Latent.LJ/Latent_Info.yaml'
+Mel_Info_Path: 'F:/Datasets/22K.NaturalSpeech2_Latent.LJ/Mel_Info.yaml'
+F0_Info_Path: 'F:/Datasets/22K.NaturalSpeech2_Latent.LJ/F0_Info.yaml'
+Speaker_Info_Path: 'F:/Datasets/22K.NaturalSpeech2_Latent.LJ/Speaker_Info.yaml'
+Emotion_Info_Path: 'F:/Datasets/22K.NaturalSpeech2_Latent.LJ/Emotion_Info.yaml'
+Language_Info_Path: 'F:/Datasets/22K.NaturalSpeech2_Latent.LJ/Language_Info.yaml'
+Gender_Info_Path: 'F:/Datasets/22K.NaturalSpeech2_Latent.LJ/Gender_Info.yaml'
+Language_and_Gender_Info_by_Speaker_Path: 'F:/Datasets/22K.NaturalSpeech2_Latent.LJ/Language_and_Gender_Info_by_Speaker.yaml'
 Train:
     Pattern_Cache: true
     # Pattern_Cache: false
     Train_Pattern:
-        Path: 'F:/Datasets/22K.NaturalSpeech2_Mel.LJ/Train'
+        Path: 'F:/Datasets/22K.NaturalSpeech2_Latent.LJ/Train'
         Metadata_File: 'METADATA.PICKLE'
         Feature_Length:
             Min: 50
@@ -97,7 +95,7 @@ Train:
         Accumulated_Dataset_Epoch: 1 # This is to prevent slow down from torch.utils.data.DataLoader when the number of patterns is small.
         Augmentation_Ratio: 0.10
     Eval_Pattern:
-        Path: 'F:/Datasets/22K.NaturalSpeech2_Mel.LJ/Eval'
+        Path: 'F:/Datasets/22K.NaturalSpeech2_Latent.LJ/Eval'
         Metadata_File: 'METADATA.PICKLE'
         Feature_Length:
             Min: 50
@@ -141,16 +139,16 @@ Train:
 
 Inference_Batch_Size: 16
 
-Inference_Path: './results/LJ_230623/Inference'
-Checkpoint_Path: './results/LJ_230623/Checkpoint'
-Log_Path: './results/LJ_230623/Log'
+Inference_Path: './results/LJ_230624/Inference'
+Checkpoint_Path: './results/LJ_230624/Checkpoint'
+Log_Path: './results/LJ_230624/Log'
 
 Weights_and_Biases:
     # Use: true
     Use: false
     Project: 'NaturalSpeech2'
     Entity: 'codejin'
-    Name: 'LJ_230623'
+    Name: 'LJ_230624'
     Save_Checkpoint:
         Use: false
         Interval: 50000 # Unlike local, The capacity of WandB is small.
