@@ -220,7 +220,7 @@ class Trainer:
         attention_priors = attention_priors.to(self.device, non_blocking=True)
 
         with torch.cuda.amp.autocast(enabled= self.hp.Use_Mixed_Precision):
-            linear_projections, _, latents_compressed, latents_compressed_slice, noises, epsilons, starts, duration_loss, f0_loss, \
+            linear_predictions, _, latents_compressed, latents_compressed_slice, noises, epsilons, starts, duration_loss, f0_loss, \
             attention_softs, attention_hards, attention_logprobs, alignments, f0s = self.model(
                 tokens= tokens,
                 token_lengths= token_lengths,
@@ -234,36 +234,32 @@ class Trainer:
                 )
             
             with torch.cuda.amp.autocast(enabled= False):
-                token_masks = (~Mask_Generate(
-                    lengths= token_lengths,
-                    max_length= tokens.size(1)
-                    ).to(tokens.device)).float()
-                mel_masks = (~Mask_Generate(
+                latent_masks = (~Mask_Generate(
                     lengths= latent_lengths,
                     max_length= mels.size(2)
                     ).to(mels.device)).float()
 
                 loss_dict['Linear'] = (self.criterion_dict['MSE'](
-                    linear_projections.float(),
+                    linear_predictions.to(latents_compressed.dtype),
                     latents_compressed,
-                    ) * mel_masks.unsqueeze(1)).mean(dim= 1).sum() / mel_masks.sum()
+                    ) * latent_masks.unsqueeze(1)).mean(dim= 1).sum() / latent_masks.sum()
                 loss_dict['Data'] = self.criterion_dict['MSE'](
-                    starts.float(),
+                    starts.to(latents_compressed_slice.dtype),
                     latents_compressed_slice,
                     ).mean()
                 loss_dict['Diffusion'] = self.criterion_dict['MSE'](
-                    epsilons.float(),
+                    epsilons.to(noises.dtype),
                     noises,
                     ).mean()
-                loss_dict['Duration'] = (duration_loss.float() * token_masks).sum() / token_masks.sum()
-                loss_dict['F0'] = (f0_loss.float() * mel_masks).sum() / mel_masks.sum()
+                loss_dict['Duration'] = duration_loss
+                loss_dict['F0'] = f0_loss
                 loss_dict['Attention_Binarization'] = self.criterion_dict['Attention_Binarization'](attention_hards, attention_softs)
                 loss_dict['Attention_CTC'] = self.criterion_dict['Attention_CTC'](attention_logprobs, token_lengths, latent_lengths)
 
         self.optimizer.zero_grad()
         self.scaler.scale(
             loss_dict['Linear'] +
-            loss_dict['Data'] / max(starts.max(), 1.0) +
+            loss_dict['Data'] +
             loss_dict['Diffusion'] +
             loss_dict['Duration'] +
             loss_dict['F0'] +
@@ -362,7 +358,7 @@ class Trainer:
         attention_priors = attention_priors.to(self.device, non_blocking=True)
 
         with torch.cuda.amp.autocast(enabled= self.hp.Use_Mixed_Precision):
-            linear_projections, _, latents_compressed, latents_compressed_slice, noises, epsilons, starts, duration_loss, f0_loss, \
+            linear_predictions, _, latents_compressed, latents_compressed_slice, noises, epsilons, starts, duration_loss, f0_loss, \
             attention_softs, attention_hards, attention_logprobs, alignments, f0s = self.model(
                 tokens= tokens,
                 token_lengths= token_lengths,
@@ -376,19 +372,15 @@ class Trainer:
                 )
 
             with torch.cuda.amp.autocast(enabled= False):
-                token_masks = (~Mask_Generate(
-                    lengths= token_lengths,
-                    max_length= tokens.size(1)
-                    ).to(tokens.device)).float()
-                mel_masks = (~Mask_Generate(
+                latent_masks = (~Mask_Generate(
                     lengths= latent_lengths,
                     max_length= mels.size(2)
                     ).to(mels.device)).float()
 
                 loss_dict['Linear'] = (self.criterion_dict['MSE'](
-                    linear_projections,
+                    linear_predictions,
                     latents_compressed,
-                    ) * mel_masks.unsqueeze(1)).sum() / mel_masks.sum()
+                    ) * latent_masks.unsqueeze(1)).mean(dim= 1).sum() / latent_masks.sum()
                 loss_dict['Data'] = self.criterion_dict['MSE'](
                     starts,
                     latents_compressed_slice,
@@ -397,8 +389,8 @@ class Trainer:
                     epsilons,
                     noises,
                     ).mean()
-                loss_dict['Duration'] = (duration_loss.float() * token_masks).sum() / token_masks.sum()
-                loss_dict['F0'] = (f0_loss.float() * mel_masks).sum() / mel_masks.sum()
+                loss_dict['Duration'] = duration_loss
+                loss_dict['F0'] = f0_loss
                 loss_dict['Attention_Binarization'] = self.criterion_dict['Attention_Binarization'](attention_hards, attention_softs)
                 loss_dict['Attention_CTC'] = self.criterion_dict['Attention_CTC'](attention_logprobs, token_lengths, latent_lengths)
 
@@ -443,7 +435,7 @@ class Trainer:
 
             with torch.inference_mode():
                 target_audios = self.model.hificodec(latents[index, None].permute(0, 2, 1).to(self.device)).squeeze(1)
-                linear_projections, diffusion_predictions, prediction_alignments, prediction_f0s = self.model.Inference(
+                linear_predictions, diffusion_predictions, prediction_alignments, prediction_f0s = self.model.Inference(
                     tokens= tokens[index].unsqueeze(0).to(self.device),
                     token_lengths= token_lengths[index].unsqueeze(0).to(self.device),
                     speech_prompts= speech_prompts[index].unsqueeze(0).to(self.device),
@@ -457,7 +449,7 @@ class Trainer:
             prediction_audio_length = prediction_latent_length * self.hp.Sound.Frame_Shift
 
             target_audio = target_audios[0, :target_audio_length].float().clamp(-1.0, 1.0)
-            linear_prediction_audio = linear_projections[0, :prediction_audio_length].float().clamp(-1.0, 1.0)
+            linear_prediction_audio = linear_predictions[0, :prediction_audio_length].float().clamp(-1.0, 1.0)
             diffusion_prediction_audio = diffusion_predictions[0, :prediction_audio_length].float().clamp(-1.0, 1.0)
 
             target_mel = self.mel_func(target_audio[None])[0, :,  :target_latent_length].cpu().numpy()

@@ -54,7 +54,7 @@ Frame_Prior_Network:
             Dropout_Rate: 0.1
 
 Diffusion:
-    Max_Step: 1000
+    Max_Step: 100
     Size: 256
     Pre_Attention:
         Query_Token: 32
@@ -68,7 +68,7 @@ Diffusion:
         Attention:
             Apply_in_Stack: 3
             Head: 2
-    Network_Prediction: 'Epsilon'   # 'Start', 'Epsilon'
+    Network_Prediction: 'Start'   # 'Start', 'Epsilon'
             
 
 Token_Path: 'F:/Datasets/22K.NaturalSpeech2_HifiCodec.LJ/Token.yaml'
@@ -105,7 +105,7 @@ Train:
             Max: 200
     Num_Workers: 0
     Batch_Size: 16
-    Segment_Size: 64
+    Segment_Size: 256
     Learning_Rate:
         Initial: 1.0e-4
         Warmup_Step: 4000
@@ -139,16 +139,16 @@ Train:
 
 Inference_Batch_Size: 16
 
-Inference_Path: './results/LJ_230630/Inference'
-Checkpoint_Path: './results/LJ_230630/Checkpoint'
-Log_Path: './results/LJ_230630/Log'
+Inference_Path: './results/LJ_230702/Inference'
+Checkpoint_Path: './results/LJ_230702/Checkpoint'
+Log_Path: './results/LJ_230702/Log'
 
 Weights_and_Biases:
     # Use: true
     Use: false
     Project: 'NaturalSpeech2'
     Entity: 'codejin'
-    Name: 'LJ_230630'
+    Name: 'LJ_230702'
     Save_Checkpoint:
         Use: false
         Interval: 50000 # Unlike local, The capacity of WandB is small.

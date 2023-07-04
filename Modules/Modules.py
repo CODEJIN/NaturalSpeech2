@@ -50,46 +50,6 @@ class NaturalSpeech2(torch.nn.Module):
         self,
         tokens: torch.LongTensor,
         token_lengths: torch.LongTensor,
-        speech_prompts: torch.FloatTensor,
-        speech_prompts_for_diffusion: Optional[torch.FloatTensor]= None,
-        latents: Optional[torch.LongTensor]= None,
-        latent_lengths: Optional[torch.LongTensor]= None,
-        f0s: Optional[torch.FloatTensor]= None,
-        mels: Optional[torch.LongTensor]= None,
-        attention_priors: Optional[torch.FloatTensor]= None,
-        ddim_steps: Optional[int]= None
-        ):
-        if all([
-            not speech_prompts_for_diffusion is None,
-            not latents is None,
-            not latent_lengths is None,
-            not f0s is None,
-            not mels is None,
-            not attention_priors is None
-            ]):    # train
-            return self.Train(
-                tokens= tokens,
-                token_lengths= token_lengths,
-                speech_prompts= speech_prompts,
-                speech_prompts_for_diffusion= speech_prompts_for_diffusion,
-                latents= latents,
-                latent_lengths= latent_lengths,
-                f0s= f0s,
-                mels= mels,
-                attention_priors= attention_priors
-                )
-        else:   #  inference
-            return self.Inference(
-                tokens= tokens,
-                token_lengths= token_lengths,
-                speech_prompts= speech_prompts,
-                ddim_steps= ddim_steps
-                )
-
-    def Train(
-        self,
-        tokens: torch.LongTensor,
-        token_lengths: torch.LongTensor,
         speech_prompts: torch.LongTensor,
         speech_prompts_for_diffusion: torch.LongTensor,
         latents: torch.LongTensor,
@@ -508,7 +468,7 @@ class Variance_Block(torch.nn.Module):
                 duration[length - 1:] = 0
                 duration[length - 1] = max_duration_sum - duration.sum()
         else:
-            duration_loss = torch.nn.functional.l1_loss(duration_predictions, durations, reduction= 'none')
+            duration_loss = torch.nn.functional.l1_loss(duration_predictions, durations, reduction= 'mean')
 
         alignments = self.Length_Regulate(durations= durations)
         encodings = encodings @ alignments  # [Batch, Enc_d, Latent_t]
@@ -523,7 +483,7 @@ class Variance_Block(torch.nn.Module):
         if f0s is None:
             f0s = f0_predictions
         else:
-            f0_loss = torch.nn.functional.l1_loss(f0_predictions, f0s, reduction= 'none')
+            f0_loss = torch.nn.functional.l1_loss(f0_predictions, f0s, reduction= 'mean')
 
         encodings = encodings + self.f0_embedding(f0s.unsqueeze(1))  # [Batch, Enc_d, Latent_t]
 
