@@ -71,20 +71,20 @@ Diffusion:
     Network_Prediction: 'Start'   # 'Start', 'Epsilon'
             
 
-Token_Path: 'F:/Datasets/22K.NaturalSpeech2_HifiCodec.LJ/Token.yaml'
-Latent_Info_Path: 'F:/Datasets/22K.NaturalSpeech2_HifiCodec.LJ/Latent_Info.yaml'
-Mel_Info_Path: 'F:/Datasets/22K.NaturalSpeech2_HifiCodec.LJ/Mel_Info.yaml'
-F0_Info_Path: 'F:/Datasets/22K.NaturalSpeech2_HifiCodec.LJ/F0_Info.yaml'
-Speaker_Info_Path: 'F:/Datasets/22K.NaturalSpeech2_HifiCodec.LJ/Speaker_Info.yaml'
-Emotion_Info_Path: 'F:/Datasets/22K.NaturalSpeech2_HifiCodec.LJ/Emotion_Info.yaml'
-Language_Info_Path: 'F:/Datasets/22K.NaturalSpeech2_HifiCodec.LJ/Language_Info.yaml'
-Gender_Info_Path: 'F:/Datasets/22K.NaturalSpeech2_HifiCodec.LJ/Gender_Info.yaml'
-Language_and_Gender_Info_by_Speaker_Path: 'F:/Datasets/22K.NaturalSpeech2_HifiCodec.LJ/Language_and_Gender_Info_by_Speaker.yaml'
+Token_Path: 'F:/Datasets/22K.NaturalSpeech2_HifiCodec.VCTK/Token.yaml'
+Latent_Info_Path: 'F:/Datasets/22K.NaturalSpeech2_HifiCodec.VCTK/Latent_Info.yaml'
+Mel_Info_Path: 'F:/Datasets/22K.NaturalSpeech2_HifiCodec.VCTK/Mel_Info.yaml'
+F0_Info_Path: 'F:/Datasets/22K.NaturalSpeech2_HifiCodec.VCTK/F0_Info.yaml'
+Speaker_Info_Path: 'F:/Datasets/22K.NaturalSpeech2_HifiCodec.VCTK/Speaker_Info.yaml'
+Emotion_Info_Path: 'F:/Datasets/22K.NaturalSpeech2_HifiCodec.VCTK/Emotion_Info.yaml'
+Language_Info_Path: 'F:/Datasets/22K.NaturalSpeech2_HifiCodec.VCTK/Language_Info.yaml'
+Gender_Info_Path: 'F:/Datasets/22K.NaturalSpeech2_HifiCodec.VCTK/Gender_Info.yaml'
+Language_and_Gender_Info_by_Speaker_Path: 'F:/Datasets/22K.NaturalSpeech2_HifiCodec.VCTK/Language_and_Gender_Info_by_Speaker.yaml'
 Train:
     Pattern_Cache: true
     # Pattern_Cache: false
     Train_Pattern:
-        Path: 'F:/Datasets/22K.NaturalSpeech2_HifiCodec.LJ/Train'
+        Path: 'F:/Datasets/22K.NaturalSpeech2_HifiCodec.VCTK/Train'
         Metadata_File: 'METADATA.PICKLE'
         Feature_Length:
             Min: 50
@@ -95,7 +95,7 @@ Train:
         Accumulated_Dataset_Epoch: 1 # This is to prevent slow down from torch.utils.data.DataLoader when the number of patterns is small.
         Augmentation_Ratio: 0.10
     Eval_Pattern:
-        Path: 'F:/Datasets/22K.NaturalSpeech2_HifiCodec.LJ/Eval'
+        Path: 'F:/Datasets/22K.NaturalSpeech2_HifiCodec.VCTK/Eval'
         Metadata_File: 'METADATA.PICKLE'
         Feature_Length:
             Min: 50

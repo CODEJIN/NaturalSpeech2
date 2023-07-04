@@ -501,7 +501,7 @@ def VCTK_Info_Load(path: str):
     '''
     VCTK v0.92 is distributed as flac files.
     '''
-    path = os.path.join(path, 'wav48_silence_trimmed').replace('\\', '/')
+    path = os.path.join(path, 'wav48').replace('\\', '/')
     
     paths = []
     for root, _, files in os.walk(path):
@@ -518,7 +518,7 @@ def VCTK_Info_Load(path: str):
     for path in paths:
         if 'p315'.upper() in path.upper():  #Officially, 'p315' text is lost in VCTK dataset.
             continue
-        text = Text_Filtering(unidecode(open(path.replace('wav48_silence_trimmed', 'txt').replace('flac', 'txt').replace('_mic2', ''), 'r').readlines()[0]))
+        text = Text_Filtering(unidecode(open(path.replace('wav48', 'txt').replace('flac', 'txt').replace('_mic2', ''), 'r').readlines()[0]))
         if text is None:
             continue
         

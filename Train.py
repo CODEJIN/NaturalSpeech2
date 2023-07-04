@@ -85,8 +85,8 @@ class Trainer:
     def Dataset_Generate(self):
         token_dict = yaml.load(open(self.hp.Token_Path, 'r', encoding= 'utf-8-sig'), Loader=yaml.Loader)
         latent_info_dict = yaml.load(open(self.hp.Latent_Info_Path, 'r'), Loader=yaml.Loader)
-        self.latent_min = min([x['Min'] for x in latent_info_dict.values()]) / len(latent_info_dict)
-        self.latent_max = max([x['Max'] for x in latent_info_dict.values()]) / len(latent_info_dict)
+        self.latent_min = min([x['Min'] for x in latent_info_dict.values()])
+        self.latent_max = max([x['Max'] for x in latent_info_dict.values()])
         f0_info_dict = yaml.load(open(self.hp.F0_Info_Path, 'r'), Loader=yaml.Loader)
 
         train_dataset = Dataset(

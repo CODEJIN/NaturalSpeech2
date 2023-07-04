@@ -19,13 +19,12 @@ Shen, K., Ju, Z., Tan, X., Liu, Y., Leng, Y., He, L., ... & Bian, J. (2023). Nat
         * Since CE-RVQ consumes a significant amount of memory, I applied sampling to reduce memory usage.
         * If you want to apply it to the entire RVQ layers, please modify the hyperparameter `hp.Diffusion.CERVQ.Num_Sample`.
         * Based on the suggestion from @Autonomof, I have added a functionality to increase the weight of the initial layers during the sampling of the CE-RVQ layers. If you set `hp.Diffusion.CERVQ.Use_Weighted_Sample == true`, the weights will be taken into account.
-* The audio codec has been changed to Meta's `Encodec 24Khz`.
+* The audio codec has been changed to `HifiCodec` from [AcademiCodec](https://github.com/yangdongchao/AcademiCodec).
     * This is done to reduce the time spent training a separate audio codec.
-    * The model uses 16Khz audio, but no audio resampling is applied.
-    * The dimension of Encodec is 128, which is smaller than the hyperparameter provided in the paper, which is 256. This may be a reason of the performance degradation.
-    * To maintain similarity with the paper, it may be better to apply Google's `SoundStream` instead of Encodec, but I couldn't apply SoundStream to this repository because official pyTorch source code or pretrained model was not provided.
-        * There is an unverified implementation of SoundStream in [Codec.py](./Modules/Codec_Backup/Codec.py), so please refer to it.
+    * The model uses 22.05Khz audio, but no audio resampling is applied.
+    * To maintain similarity with the paper, it may be better to apply Google's `SoundStream` instead of HifiCodec, but I couldn't apply SoundStream to this repository because official pyTorch source code or pretrained model was not provided.
         * Although this repository does not use, there is also a [c++ or tflite version of Lyra](https://github.com/google/lyra), which may allow the application of SoundStream using it.
+    * Meta's Encodec 24K version was also tested, but it could not be trained.
 * Information on the segment length σ of the speech prompt during training was not found in the paper and was arbitrarily set.
     * The `σ` = 3, 5, and 10 seconds used in the evaluation of paper are too long to apply to both the variance predictor and diffusion during training.
     * To ensure stability in pattern usage, half the length of the shortest pattern used in each training is set as `σ` for each training.
