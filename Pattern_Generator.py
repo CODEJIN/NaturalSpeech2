@@ -12,7 +12,7 @@ from unidecode import unidecode
 
 from meldataset import mel_spectrogram
 
-from encodec import EncodecModel
+from hificodec.vqvae import VQVAE
 
 from Arg_Parser import Recursive_Parse
 
@@ -24,7 +24,11 @@ if __name__ == '__main__':
         device = torch.device('cpu')
     else:
         device = torch.device('cuda:0')
-    encodec = EncodecModel.encodec_model_24khz().to(device)
+    hificodec = VQVAE(
+        config_path= './hificodec/config_24k_320d.json',
+        ckpt_path= './hificodec/HiFi-Codec-24k-320d',
+        with_encoder= True
+        ).to(device)
 
 def Text_Filtering(text: str):
     remove_letter_list = ['(', ')', '\"', '[', ']', ':', ';']
@@ -108,20 +112,20 @@ def Pattern_Generate(
     audio, _ = librosa.load(path, sr= sample_rate)
     audio = librosa.util.normalize(audio) * 0.95
     audio = audio[:audio.shape[0] - (audio.shape[0] % hop_size)]
+    audio_tensor = torch.from_numpy(audio).to(device).float()[None]
     with torch.inference_mode():
-        latents = encodec.encode(torch.from_numpy(audio)[None, None].to(device))[0][0].squeeze(0).cpu().numpy()    # [32, Audio_t / 320]
-
-    mel = mel_spectrogram(
-        y= torch.from_numpy(audio).float().unsqueeze(0),
-        n_fft= hop_size * 4,
-        num_mels= num_mels,
-        sampling_rate= sample_rate,
-        hop_size= hop_size,
-        win_size= hop_size * 4,
-        fmin= 0,
-        fmax= None,
-        center= False
-        ).squeeze(0).numpy()
+        latent = hificodec.encode(audio_tensor)[0].T.cpu().numpy() # [4, Audio_t / 320]
+        mel = mel_spectrogram(
+            y= audio_tensor,
+            n_fft= hop_size * 4,
+            num_mels= num_mels,
+            sampling_rate= sample_rate,
+            hop_size= hop_size,
+            win_size= hop_size * 4,
+            fmin= 0,
+            fmax= None,
+            center= False
+            )[0].cpu().numpy()
 
     f0 = rapt(
         x= audio * 32768,
@@ -132,13 +136,13 @@ def Pattern_Generate(
         otype= 1
         )
     
-    if abs(latents.shape[1] - f0.shape[0]) > 1:
+    if abs(latent.shape[1] - f0.shape[0]) > 1:
         return None, None, None, None
-    elif latents.shape[1] > f0.shape[0]:
-        f0 = np.pad(f0, [0, latents.shape[1] - f0.shape[0]], constant_values= 0.0)
+    elif latent.shape[1] > f0.shape[0]:
+        f0 = np.pad(f0, [0, latent.shape[1] - f0.shape[0]], constant_values= 0.0)
     else:   # mel.shape[1] < f0.shape[0]:
-        audio = np.pad(audio, [0, (f0.shape[0] - latents.shape[1]) * hop_size])
-        latents = np.pad(latents, [[0, 0], [0, f0.shape[0] - latents.shape[1]]], mode= 'edge')
+        audio = np.pad(audio, [0, (f0.shape[0] - latent.shape[1]) * hop_size])
+        latent = np.pad(latent, [[0, 0], [0, f0.shape[0] - latent.shape[1]]], mode= 'edge')
 
     if mel.shape[1] - f0.shape[0] < 0 or mel.shape[1] - f0.shape[0] > 1:
         return None, None, None, None
@@ -152,11 +156,11 @@ def Pattern_Generate(
     initial_silence_frame = max(initial_silence_frame - 11, 0)
     last_silence_frame = min(last_silence_frame + 11, f0.shape[0])
     audio = audio[initial_silence_frame * hop_size:last_silence_frame * hop_size]
-    latents = latents[:, initial_silence_frame:last_silence_frame]
+    latent = latent[:, initial_silence_frame:last_silence_frame]
     mel = mel[:, initial_silence_frame:last_silence_frame]
     f0 = f0[initial_silence_frame:last_silence_frame]
     
-    return audio.astype(np.float16), latents.astype(np.int16), mel.astype(np.float16), f0.astype(np.float16)
+    return audio.astype(np.float16), latent.astype(np.int16), mel.astype(np.float16), f0.astype(np.float16)
 
 def Pattern_File_Generate(path: str, speaker: str, emotion: str, language: str, gender: str, dataset: str, text: str, pronunciation: str, tag: str='', eval: bool= False):
     pattern_path = hp.Train.Eval_Pattern.Path if eval else hp.Train.Train_Pattern.Path
@@ -857,7 +861,7 @@ def Metadata_Generate(eval: bool= False):
                 if not pattern_dict['Speaker'] in f0_dict.keys():
                     f0_dict[pattern_dict['Speaker']] = []
                 
-                latent = encodec.quantizer.decode(torch.from_numpy(pattern_dict['Latent']).unsqueeze(1).long().to(device)).squeeze(0).cpu()
+                latent = hificodec.quantizer.embed(torch.from_numpy(pattern_dict['Latent']).T[None].long().to(device)).squeeze(0).cpu()
                 latent_dict[pattern_dict['Speaker']]['Min'] = min(latent_dict[pattern_dict['Speaker']]['Min'], latent.min().item())
                 latent_dict[pattern_dict['Speaker']]['Max'] = max(latent_dict[pattern_dict['Speaker']]['Max'], latent.max().item())
                 mel_dict[pattern_dict['Speaker']]['Min'] = min(mel_dict[pattern_dict['Speaker']]['Min'], pattern_dict['Mel'].min().item())

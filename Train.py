@@ -442,13 +442,13 @@ class Trainer:
             index = np.random.randint(0, tokens.size(0))
 
             with torch.inference_mode():
+                target_audios = self.model.hificodec(latents[index, None].permute(0, 2, 1).to(self.device)).squeeze(1)
                 linear_projections, diffusion_predictions, prediction_alignments, prediction_f0s = self.model.Inference(
                     tokens= tokens[index].unsqueeze(0).to(self.device),
                     token_lengths= token_lengths[index].unsqueeze(0).to(self.device),
                     speech_prompts= speech_prompts[index].unsqueeze(0).to(self.device),
                     ddim_steps= max(self.hp.Diffusion.Max_Step // 10, 100)
                     )
-                target_audios = self.model.encodec.decode([[latents[index, None].to(self.device), None]]).squeeze(1)
             
             token_length = token_lengths[index].item()
             target_latent_length = target_alignments[index].sum().long().item()

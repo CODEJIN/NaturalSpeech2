@@ -3,7 +3,7 @@ import torch
 import numpy as np
 import math
 from typing import Optional, Union, Tuple
-from encodec import EncodecModel
+from hificodec.vqvae import VQVAE
 
 from .Nvidia_Alignment_Learning_Framework import Alignment_Learning_Framework
 from .Diffusion import Diffusion
@@ -37,7 +37,12 @@ class NaturalSpeech2(torch.nn.Module):
 
         self.diffusion = Diffusion(self.hp)
 
-        self.encodec = EncodecModel.encodec_model_24khz()
+        self.hificodec = VQVAE(
+            config_path= './hificodec/config_24k_320d.json',
+            ckpt_path= './hificodec/HiFi-Codec-24k-320d',
+            with_encoder= False
+            )
+
 
         self.segment = Segment()
 
@@ -94,11 +99,11 @@ class NaturalSpeech2(torch.nn.Module):
         attention_priors: torch.Tensor,
         ):
         latent_codes = latents
-        with torch.no_grad():
-            latents = self.encodec.quantizer.decode(latents.permute(1, 0, 2))
-            latents = (latents - self.latent_min) / (self.latent_max - self.latent_min) * 2.0 - 1.0
-            speech_prompts = self.encodec.quantizer.decode(speech_prompts.permute(1, 0, 2))
-            speech_prompts_for_diffusion = self.encodec.quantizer.decode(speech_prompts_for_diffusion.permute(1, 0, 2))
+        with torch.no_grad():            
+            latents = self.hificodec.quantizer.embed(latents.permute(0, 2, 1)) # type: ignore
+            latents = (latents - self.latent_min) / (self.latent_max - self.latent_min) * 2.0 - 1.0 # type: ignore
+            speech_prompts = self.hificodec.quantizer.embed(speech_prompts.permute(0, 2, 1)) # type: ignore
+            speech_prompts_for_diffusion = self.hificodec.quantizer.embed(speech_prompts_for_diffusion.permute(0, 2, 1)) # type: ignore
 
         encodings = self.encoder(
             tokens= tokens,
@@ -163,7 +168,7 @@ class NaturalSpeech2(torch.nn.Module):
         ddim_steps: Optional[int]= None,
         temperature: Optional[float]= 1.0 # 1.2 ** 2
         ):
-        speech_prompts = self.encodec.quantizer.decode(speech_prompts.permute(1, 0, 2))
+        speech_prompts = self.hificodec.quantizer.embed(speech_prompts.permute(0, 2, 1)) # type: ignore
         encodings = self.encoder(
             tokens= tokens,
             lengths= token_lengths
@@ -210,27 +215,21 @@ class NaturalSpeech2(torch.nn.Module):
         diffusion_predictions = (diffusion_predictions + 1.0) / 2.0 * (self.latent_max - self.latent_min) + self.latent_min
 
         # Performing VQ to correct the incomplete predictions of diffusion.
-        linear_predictions = self.encodec.quantizer.encode(
-            x= linear_predictions,
-            sample_rate= self.encodec.frame_rate,
-            bandwidth= self.encodec.bandwidth
-            )
-        linear_predictions = self.encodec.quantizer.decode(linear_predictions)
-        linear_predictions = self.encodec.decoder(linear_predictions).squeeze(1)  # [Batch, Audio_t]
+        *_, linear_predictions = self.hificodec.quantizer(linear_predictions)
+        linear_predictions = [code.reshape(tokens.size(0), -1) for code in linear_predictions]
+        linear_predictions = torch.stack(linear_predictions, -1)
+        linear_predictions = self.hificodec(linear_predictions).squeeze(1)
 
-        diffusion_predictions = self.encodec.quantizer.encode(
-            x= diffusion_predictions,
-            sample_rate= self.encodec.frame_rate,
-            bandwidth= self.encodec.bandwidth
-            )
-        diffusion_predictions = self.encodec.quantizer.decode(diffusion_predictions)
-        diffusion_predictions = self.encodec.decoder(diffusion_predictions).squeeze(1)  # [Batch, Audio_t]
+        *_, diffusion_predictions = self.hificodec.quantizer(diffusion_predictions)
+        diffusion_predictions = [code.reshape(tokens.size(0), -1) for code in diffusion_predictions]
+        diffusion_predictions = torch.stack(diffusion_predictions, -1)
+        diffusion_predictions = self.hificodec(diffusion_predictions).squeeze(1)
         
         return linear_predictions, diffusion_predictions, alignments, f0s
     
     def train(self, mode: bool= True):
         super().train(mode= mode)
-        self.encodec.eval() # encodec is always eval mode.
+        self.hificodec.eval() # hificodec is always eval mode.
 
 class Encoder(torch.nn.Module): 
     def __init__(
