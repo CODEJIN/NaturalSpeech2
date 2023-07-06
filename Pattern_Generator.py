@@ -976,7 +976,7 @@ if __name__ == '__main__':
 
     parser.add_argument("-evalr", "--eval_ratio", default= 0.001, type= float)
     parser.add_argument("-evalm", "--eval_min", default= 1, type= int)
-    parser.add_argument("-mw", "--max_worker", default= 2, required=False, type= int)
+    parser.add_argument("-mw", "--max_worker", default= 1, required=False, type= int)
 
     args = parser.parse_args()
 
@@ -1110,6 +1110,11 @@ if __name__ == '__main__':
         for token in phonemes
         ])
     token_dict = Token_dict_Generate(tokens= tokens)
+
+    if device == 'cuda:0' and args.max_worker > 1:
+        args.max_worker = 1
+        print('If using CUDA, the max_worker must be set to 1 to prevent CUDA memory management issues.')
+
 
     with PE(max_workers = args.max_worker) as pe:
         for _ in tqdm(
