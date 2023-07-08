@@ -18,7 +18,7 @@ Shen, K., Ju, Z., Tan, X., Liu, Y., Leng, Y., He, L., ... & Bian, J. (2023). Nat
     * CE-RVQ is only applied to the last RVQ layer.
         * In the tests, when applied to all layers, the loss term of CE-RVQ becomes too large, causing the data loss to not decrease properly.
         * The cause of this issue is unknown.
-        * One possible explanation is that the HifiCodec used in this repository, which has only two residuals, may have a significant influence from the previous RVQ layers compared to the 16 layers in the original paper.
+        * One possible explanation is that the HifiCodec used in this repository, which has only two RVQ layers, may have a significant influence from the former RVQ layers compared to the 16 RVQ in the original paper.
 * The audio codec has been changed to `HifiCodec` from [AcademiCodec](https://github.com/yangdongchao/AcademiCodec).
     * This is done to reduce the time spent training a separate audio codec.
     * The model uses 22.05Khz audio, but no audio resampling is applied.
@@ -57,7 +57,7 @@ Before proceeding, please set the pattern, inference, and checkpoint paths in [H
 
 * Audio_Codec
     * Setting the audio codec.
-    * This repository is using Encodec, so only the size of the latents output from Encodec's encoder is set for reference in other modules.
+    * This repository is using HifiCodec, so only the size of the latents output from HifiCodec's encoder is set for reference in other modules.
 
 * Train
     * Setting the parameters of training.
