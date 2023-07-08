@@ -262,7 +262,7 @@ class Trainer:
             loss_dict['Linear'] +
             loss_dict['Data'] +
             loss_dict['Diffusion'] +
-            loss_dict['CE_RVQ'] +
+            loss_dict['CE_RVQ'] * self.hp.Train.Learning_Rate.CE_RVQ_Lambda +
             loss_dict['Duration'] +
             loss_dict['F0'] +
             loss_dict['Attention_Binarization'] +

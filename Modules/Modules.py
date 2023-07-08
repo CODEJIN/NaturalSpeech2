@@ -690,7 +690,6 @@ class CE_RVQ(torch.nn.Module):
         ):
         super().__init__()
         self.codec = codec
-        
 
     def forward(
         self,
@@ -707,6 +706,9 @@ class CE_RVQ(torch.nn.Module):
             x = residuals
             quantizations, *_ = self.codec.quantizer.for_one_step(residuals, residual_index)
             residuals = residuals - quantizations.detach()
+
+            if residual_index < self.codec.quantizer.residul_layer - 1:
+                continue
 
             x = rearrange(x, 'batch latent_d latent_t -> batch 1 latent_t latent_d')
             x = x.chunk(chunks= self.codec.quantizer.n_code_groups, dim= 3)
