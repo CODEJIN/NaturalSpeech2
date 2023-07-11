@@ -9,22 +9,17 @@ Shen, K., Ju, Z., Tan, X., Liu, Y., Leng, Y., He, L., ... & Bian, J. (2023). Nat
 
 # Modifications from Paper
 * The structure is derived from NaturalSpeech 2, but I made several modifications.
-* About CE-RVQ
-    * The CE-RVQ implementation in the current repository is incomplete.
-        * I had doubts about the loss calculation formula mentioned in the paper, so the previous implementation has been commented out.
-        * I think the current implementation aligns with the purpose of CE-RVQ, but deviates from the paper. 
-        * The current implementation has not been verified how positively this loss contributes to model training.
-        * I would greatly appreciate any advice or suggestions you may have regarding this matter.
-    * CE-RVQ is only applied to the last RVQ layer.
-        * In the tests, when applied to all layers, the loss term of CE-RVQ becomes too large, causing the data loss to not decrease properly.
-        * The cause of this issue is unknown.
-        * One possible explanation is that the HifiCodec used in this repository, which has only two RVQ layers, may have a significant influence from the former RVQ layers compared to the 16 RVQ in the original paper.
 * The audio codec has been changed to `HifiCodec` from [AcademiCodec](https://github.com/yangdongchao/AcademiCodec).
     * This is done to reduce the time spent training a separate audio codec.
     * The model uses 22.05Khz audio, but no audio resampling is applied.
     * To maintain similarity with the paper, it may be better to apply Google's `SoundStream` instead of HifiCodec, but I couldn't apply SoundStream to this repository because official pyTorch source code or pretrained model was not provided.
         * Although this repository does not use, there is also a [c++ or tflite version of Lyra](https://github.com/google/lyra), which may allow the application of SoundStream using it.
     * Meta's Encodec 24K version was also tested, but it could not be trained.
+* About CE-RVQ
+    * I have observed that the quality of the model with CE-RVQ applied is decreased, so it has been removed from the current implementation.
+    * However, this does not necessarily mean that CE-RVQ is ineffective.
+    * It could be due to the change of codec in this repository or the presence of bugs in the implemented module.
+    * This aspect requires further validation and investigation.
 * Information on the segment length σ of the speech prompt during training was not found in the paper and was arbitrarily set.
     * The `σ` = 3, 5, and 10 seconds used in the evaluation of paper are too long to apply to both the variance predictor and diffusion during training.
     * To ensure stability in pattern usage, half the length of the shortest pattern used in each training is set as `σ` for each training.

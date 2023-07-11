@@ -220,7 +220,7 @@ class Trainer:
         attention_priors = attention_priors.to(self.device, non_blocking=True)
 
         with torch.cuda.amp.autocast(enabled= self.hp.Use_Mixed_Precision):
-            linear_predictions, _, latents_compressed, latents_compressed_slice, noises, epsilons, starts, duration_loss, f0_loss, ce_rvq_loss, \
+            linear_predictions, _, latents_compressed, latents_compressed_slice, noises, epsilons, starts, duration_loss, f0_loss, \
             attention_softs, attention_hards, attention_logprobs, alignments, f0s = self.model(
                 tokens= tokens,
                 token_lengths= token_lengths,
@@ -251,7 +251,6 @@ class Trainer:
                     epsilons.to(noises.dtype),
                     noises,
                     ).mean()
-                loss_dict['CE_RVQ'] = ce_rvq_loss
                 loss_dict['Duration'] = duration_loss
                 loss_dict['F0'] = f0_loss
                 loss_dict['Attention_Binarization'] = self.criterion_dict['Attention_Binarization'](attention_hards, attention_softs)
@@ -260,9 +259,8 @@ class Trainer:
         self.optimizer.zero_grad()
         self.scaler.scale(
             loss_dict['Linear'] +
-            loss_dict['Data'] +
-            loss_dict['Diffusion'] +
-            loss_dict['CE_RVQ'] * self.hp.Train.Learning_Rate.CE_RVQ_Lambda +
+            loss_dict['Data'] * self.hp.Train.Learning_Rate.Diffusion_Lambda +
+            loss_dict['Diffusion'] * self.hp.Train.Learning_Rate.Diffusion_Lambda +
             loss_dict['Duration'] +
             loss_dict['F0'] +
             loss_dict['Attention_Binarization'] +
@@ -360,7 +358,7 @@ class Trainer:
         attention_priors = attention_priors.to(self.device, non_blocking=True)
 
         with torch.cuda.amp.autocast(enabled= self.hp.Use_Mixed_Precision):
-            linear_predictions, _, latents_compressed, latents_compressed_slice, noises, epsilons, starts, duration_loss, f0_loss, ce_rvq_loss, \
+            linear_predictions, _, latents_compressed, latents_compressed_slice, noises, epsilons, starts, duration_loss, f0_loss, \
             attention_softs, attention_hards, attention_logprobs, alignments, f0s = self.model(
                 tokens= tokens,
                 token_lengths= token_lengths,
@@ -391,7 +389,6 @@ class Trainer:
                     epsilons,
                     noises,
                     ).mean()
-                loss_dict['CE_RVQ'] = ce_rvq_loss
                 loss_dict['Duration'] = duration_loss
                 loss_dict['F0'] = f0_loss
                 loss_dict['Attention_Binarization'] = self.criterion_dict['Attention_Binarization'](attention_hards, attention_softs)

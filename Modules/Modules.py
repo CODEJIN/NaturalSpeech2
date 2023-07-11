@@ -44,11 +44,6 @@ class NaturalSpeech2(torch.nn.Module):
             ckpt_path= './hificodec/HiFi-Codec-24k-320d',
             with_encoder= False
             )
-        
-        self.ce_rvq = CE_RVQ(
-            codec= self.hificodec
-            )
-
 
         self.segment = Segment()
 
@@ -129,13 +124,8 @@ class NaturalSpeech2(torch.nn.Module):
             speech_prompts= speech_prompts_for_diffusion,            
             )
         
-        ce_rvq_loss = self.ce_rvq(
-            diffusion_starts= starts,
-            target_latent_codes= latent_codes_slice
-            )
-        
         return \
-            linear_predictions, None, latents, latents_slice, noises, epsilons, starts, duration_loss, f0_loss, ce_rvq_loss, \
+            linear_predictions, None, latents, latents_slice, noises, epsilons, starts, duration_loss, f0_loss, \
             attention_softs, attention_hards, attention_logprobs, alignments, f0s
 
     def Inference(
@@ -681,52 +671,3 @@ def Mask_Generate(lengths: torch.Tensor, max_length: Optional[Union[int, torch.T
     max_length = max_length or torch.max(lengths)
     sequence = torch.arange(max_length)[None, :].to(lengths.device)
     return sequence >= lengths[:, None]    # [Batch, Time]
-
-
-class CE_RVQ(torch.nn.Module):
-    def __init__(
-        self,
-        codec: VQVAE
-        ):
-        super().__init__()
-        self.codec = codec
-
-    def forward(
-        self,
-        diffusion_starts: torch.FloatTensor,
-        target_latent_codes: torch.LongTensor
-        ):
-        '''
-        diffusion_starts: [Batch, Latent_d, Latent_t]
-        target_latent_codes: [Batch, Num_VQ, Latent_t]
-        '''
-        residuals = diffusion_starts
-        losses = []
-        for residual_index in range(self.codec.quantizer.residul_layer):
-            x = residuals
-            quantizations, *_ = self.codec.quantizer.for_one_step(residuals, residual_index)
-            residuals = residuals - quantizations.detach()
-
-            if residual_index < self.codec.quantizer.residul_layer - 1:
-                continue
-
-            x = rearrange(x, 'batch latent_d latent_t -> batch 1 latent_t latent_d')
-            x = x.chunk(chunks= self.codec.quantizer.n_code_groups, dim= 3)
-
-            if residual_index == 0:
-                quantizer_modules = self.codec.quantizer.quantizer_modules
-            else:
-                quantizer_modules = self.codec.quantizer.quantizer_modules2
-
-            for quanizer_index, (x_chunk, quantizer_module) in enumerate(zip(x, quantizer_modules)):
-                latent_codes = target_latent_codes[:, self.codec.quantizer.n_code_groups * residual_index + quanizer_index, :]
-                codebooks = rearrange(quantizer_module.embedding.weight, 'num_codebook latent_d -> 1 num_codebook 1 latent_d')
-                logits = -(x_chunk - codebooks.detach()).pow(2.0).mean(dim= 3)
-                losses.append(torch.nn.functional.cross_entropy(logits, latent_codes, reduction= 'mean'))
-
-        return torch.stack(losses).mean()
-    
-    def train(self, mode: bool= True):
-        super().train(mode= mode)
-        self.codec.eval() # hificodec is always eval mode.
-            
