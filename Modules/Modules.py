@@ -10,7 +10,7 @@ from hificodec.vqvae import VQVAE
 from .Nvidia_Alignment_Learning_Framework import Alignment_Learning_Framework
 from .Diffusion import Diffusion
 from .LinearAttention import LinearAttention
-from .Layer import Conv1d, RMSNorm
+from .Layer import Conv1d, LayerNorm
 
 
 class NaturalSpeech2(torch.nn.Module):
@@ -60,7 +60,7 @@ class NaturalSpeech2(torch.nn.Module):
         attention_priors: torch.Tensor,
         ):
         latent_codes = latents
-        with torch.no_grad():            
+        with torch.no_grad():
             latents = self.hificodec.quantizer.embed(latents.permute(0, 2, 1)) # type: ignore
             latents = (latents - self.latent_min) / (self.latent_max - self.latent_min) * 2.0 - 1.0 # type: ignore
             speech_prompts = self.hificodec.quantizer.embed(speech_prompts.permute(0, 2, 1)) # type: ignore
@@ -90,12 +90,11 @@ class NaturalSpeech2(torch.nn.Module):
             feature_lengths= latent_lengths
             )
         
-        encodings, linear_predictions = self.frame_prior_network(
+        encodings = self.frame_prior_network(
             encodings= encodings,
             lengths= latent_lengths
             )
-        encodings = torch.cat([encodings, linear_predictions], dim= 1)
-        
+
         encodings_slice, offsets = self.segment(
             patterns= encodings.permute(0, 2, 1),
             segment_size= self.hp.Train.Segment_Size,
@@ -125,7 +124,7 @@ class NaturalSpeech2(torch.nn.Module):
             )
         
         return \
-            linear_predictions, None, latents, latents_slice, noises, epsilons, starts, duration_loss, f0_loss, \
+            latents_slice, noises, epsilons, starts, duration_loss, f0_loss, \
             attention_softs, attention_hards, attention_logprobs, alignments, f0s
 
     def Inference(
@@ -150,27 +149,11 @@ class NaturalSpeech2(torch.nn.Module):
             )
         latent_lengths = alignments.sum(dim= [1, 2])
         
-        encodings, linear_predictions = self.frame_prior_network(
+        encodings = self.frame_prior_network(
             encodings= encodings,
             lengths= latent_lengths
             )
-        encodings = torch.cat([encodings, linear_predictions], dim= 1)
-
-        # if not ddim_steps is None and ddim_steps < self.hp.Diffusion.Max_Step:
-        #     diffusion_predictions = self.diffusion.DDIM(
-        #         encodings= encodings,
-        #         lengths= mel_lengths,
-        #         speech_prompts= speech_prompts,
-        #         ddim_steps= ddim_steps,
-        #         temperature= temperature
-        #         )        
-        # else:
-        #     diffusion_predictions = self.diffusion.DDPM(
-        #         encodings= encodings,
-        #         lengths= mel_lengths,
-        #         speech_prompts= speech_prompts,
-        #         temperature= temperature
-        #         )
+        
         diffusion_predictions = self.diffusion.DDIM(
             encodings= encodings,
             lengths= latent_lengths,
@@ -179,21 +162,15 @@ class NaturalSpeech2(torch.nn.Module):
             temperature= temperature
             )
 
-        linear_predictions = (linear_predictions + 1.0) / 2.0 * (self.latent_max - self.latent_min) + self.latent_min
         diffusion_predictions = (diffusion_predictions + 1.0) / 2.0 * (self.latent_max - self.latent_min) + self.latent_min
 
         # Performing VQ to correct the incomplete predictions of diffusion.
-        *_, linear_predictions = self.hificodec.quantizer(linear_predictions)
-        linear_predictions = [code.reshape(tokens.size(0), -1) for code in linear_predictions]
-        linear_predictions = torch.stack(linear_predictions, -1)
-        linear_predictions = self.hificodec(linear_predictions).squeeze(1)
-
         *_, diffusion_predictions = self.hificodec.quantizer(diffusion_predictions)
         diffusion_predictions = [code.reshape(tokens.size(0), -1) for code in diffusion_predictions]
         diffusion_predictions = torch.stack(diffusion_predictions, -1)
         diffusion_predictions = self.hificodec(diffusion_predictions).squeeze(1)
         
-        return linear_predictions, diffusion_predictions, alignments, f0s
+        return diffusion_predictions, alignments, f0s
     
     def train(self, mode: bool= True):
         super().train(mode= mode)
@@ -273,10 +250,8 @@ class Frame_Prior_Network(torch.nn.Module):
         '''
         for block in self.blocks:
             encodings = block(encodings, lengths)
-
-        predictions = self.projection(encodings)
         
-        return encodings, predictions
+        return encodings
 
 
 class FFT_Block(torch.nn.Module):
@@ -352,7 +327,7 @@ class FFN(torch.nn.Module):
             padding= (kernel_size - 1) // 2,
             w_init_gain= 'linear'
             )
-        self.norm = RMSNorm(
+        self.norm = LayerNorm(
             num_features= channels,
             )
         
@@ -392,7 +367,7 @@ class Speech_Prompter(torch.nn.Module):
                 kernel_size= 1,
                 w_init_gain= 'relu'
                 ),
-            RMSNorm(num_features= self.hp.Speech_Prompter.Size),
+            LayerNorm(num_features= self.hp.Speech_Prompter.Size),
             torch.nn.SiLU()
             )
         
@@ -538,7 +513,7 @@ class Variance_Predictor(torch.nn.Module):
                     padding= (conv_kernel_size - 1) // 2,
                     w_init_gain= 'relu'
                     ))
-                conv.append(RMSNorm(num_features= channels))
+                conv.append(LayerNorm(num_features= channels))
                 conv.append(torch.nn.SiLU())
                 conv.append(torch.nn.Dropout(p= conv_dropout_rate))
                 conv_block.append(conv)

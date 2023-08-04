@@ -140,16 +140,16 @@ Train:
 
 Inference_Batch_Size: 16
 
-Inference_Path: './results/VCTK_230712/Inference'
-Checkpoint_Path: './results/VCTK_230712/Checkpoint'
-Log_Path: './results/VCTK_230712/Log'
+Inference_Path: './results/VCTK_230805/Inference'
+Checkpoint_Path: './results/VCTK_230805/Checkpoint'
+Log_Path: './results/VCTK_230805/Log'
 
 Weights_and_Biases:
     # Use: true
     Use: false
     Project: 'NaturalSpeech2'
     Entity: 'codejin'
-    Name: 'VCTK_230712'
+    Name: 'VCTK_230805'
     Save_Checkpoint:
         Use: false
         Interval: 50000 # Unlike local, The capacity of WandB is small.

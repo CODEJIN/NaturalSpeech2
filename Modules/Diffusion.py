@@ -5,7 +5,7 @@ from typing import Optional, List, Dict, Union
 from tqdm import tqdm
 
 from .LinearAttention import LinearAttention
-from .Layer import Conv1d, Lambda
+from .Layer import Conv1d, Lambda, LayerNorm
 
 class Diffusion(torch.nn.Module):
     def __init__(
@@ -225,29 +225,44 @@ class Diffusion_Network(torch.nn.Module):
                 kernel_size= 1,
                 w_init_gain= 'relu'
                 ),
+            LayerNorm(
+                num_features= self.hp.Diffusion.Size
+                ),
             torch.nn.SiLU()
             )
 
+        self.encoding_prenet = Conv1d(
+            in_channels= self.hp.Encoder.Size,
+            out_channels= self.hp.Diffusion.Size,
+            kernel_size= 1,
+            w_init_gain= 'relu'
+            )
         self.encoding_ffn = torch.nn.Sequential(
             Conv1d(
-                in_channels= self.hp.Encoder.Size + self.hp.Audio_Codec_Size,
-                out_channels= self.hp.Encoder.Size * 4,
+                in_channels= self.hp.Diffusion.Size,
+                out_channels= self.hp.Diffusion.Size * 4,
                 kernel_size= 1,
                 w_init_gain= 'relu'
                 ),
             torch.nn.SiLU(),
             Conv1d(
-                in_channels= self.hp.Encoder.Size * 4,
+                in_channels= self.hp.Diffusion.Size * 4,
                 out_channels= self.hp.Diffusion.Size,
                 kernel_size= 1,
                 w_init_gain= 'linear'
                 )
             )
-        self.step_ffn = torch.nn.Sequential(
+        self.encoding_norm = LayerNorm(
+            num_features= self.hp.Diffusion.Size
+            )
+
+        self.step_embedding = torch.nn.Sequential(
             Diffusion_Embedding(
                 channels= self.hp.Diffusion.Size
                 ),
             Lambda(lambda x: x.unsqueeze(2)),
+            )            
+        self.step_ffn = torch.nn.Sequential(
             Conv1d(
                 in_channels= self.hp.Diffusion.Size + 1,
                 out_channels= self.hp.Diffusion.Size * 4,
@@ -261,6 +276,9 @@ class Diffusion_Network(torch.nn.Module):
                 kernel_size= 1,
                 w_init_gain= 'linear'
                 )
+            )
+        self.step_norm = LayerNorm(
+            num_features= self.hp.Diffusion.Size
             )
         
         self.pre_attention = LinearAttention(
@@ -321,8 +339,17 @@ class Diffusion_Network(torch.nn.Module):
         diffusion_steps = diffusion_steps.float() / self.hp.Diffusion.Max_Step
 
         x = self.prenet(features)  # [Batch, Diffusion_d, Audio_ct]
+
+        encoding_residuals = encodings = self.encoding_prenet(encodings)
         encodings = self.encoding_ffn(encodings) # [Batch, Diffusion_d, Audio_ct]
+        encodings = self.encoding_norm(encodings + encoding_residuals)
+        
+        diffusion_steps = self.step_embedding(diffusion_steps)
+        diffusion_step_residuals = diffusion_steps[:, 1:, :]
+
         diffusion_steps = self.step_ffn(diffusion_steps) # [Batch, Diffusion_d, 1]
+
+        diffusion_steps = self.step_norm(diffusion_steps + diffusion_step_residuals)
 
         speech_prompts = self.pre_attention(
             queries= self.pre_attention_query.expand(speech_prompts.size(0), -1, -1),
