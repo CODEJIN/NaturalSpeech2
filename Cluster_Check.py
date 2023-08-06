@@ -102,6 +102,9 @@ class Checker:
             ).to(self.device)
         
         self.Load_Checkpoint(checkpoint_path)
+        print(f'Pre attention query min: {self.model.diffusion.network.pre_attention_query.min()}')
+        print(f'Pre attention query max: {self.model.diffusion.network.pre_attention_query.max()}')
+
         self.Dataset_Generate(num_speaker= num_speaker)
 
     def Dataset_Generate(
@@ -223,4 +226,4 @@ if __name__ == '__main__':
         output_path= args.output_path
         )
     
-# python Cluster_Check.py -hp Hyper_Parameters.yaml -c ./results/VCTK_230805/Checkpoint/S_101191.pt -o ./S_101191.png -n 15
+# python Cluster_Check.py -hp Hyper_Parameters.yaml -c ./results/VCTK_230805/Checkpoint/S_110000.pt -o ./S_110000.png -n 20

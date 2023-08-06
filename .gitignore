@@ -21,3 +21,4 @@ Modules/Stochastic_Duration_Predictor_Transforms.py
 Modules/Stochastic_Duration_Predictor.py
 Train.py
 hificodec/HiFi-Codec-24k-320d
+*.png
