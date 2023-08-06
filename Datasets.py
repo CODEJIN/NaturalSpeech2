@@ -4,7 +4,7 @@ import numpy as np
 import pickle, os, logging, librosa
 from typing import Dict, List, Optional
 import functools
-from encodec import EncodecModel
+from hificodec.vqvae import VQVAE
 
 from Pattern_Generator import Text_Filtering, Phonemize
 from Modules.Nvidia_Alignment_Learning_Framework import Attention_Prior_Generator
@@ -157,7 +157,11 @@ class Inference_Dataset(torch.utils.data.Dataset):
         self.sample_rate = sample_rate
         self.hop_size = hop_size
         self.use_between_padding = use_between_padding
-        self.encodec = EncodecModel.encodec_model_24khz()
+        self.hificodec = VQVAE(
+            config_path= './hificodec/config_24k_320d.json',
+            ckpt_path= './hificodec/HiFi-Codec-24k-320d',
+            with_encoder= True
+            )
 
         pronunciations = Phonemize(texts, language= 'English')
 
@@ -187,7 +191,7 @@ class Inference_Dataset(torch.utils.data.Dataset):
         audio = librosa.util.normalize(audio) * 0.95
         audio = audio[:audio.shape[0] - (audio.shape[0] % self.hop_size)]
 
-        latent = self.encodec.encode(torch.from_numpy(audio)[None, None])[0][0].squeeze(0).short().numpy()  # [32, Audio_t / 320]
+        latent = self.hificodec.encode(torch.from_numpy(audio)[None])[0].T.cpu().numpy() # [4, Audio_t / 320]
 
         return token, latent, text, pronunciation, reference
 

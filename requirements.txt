@@ -10,4 +10,5 @@ hgtk
 pysptk
 transformers
 einops
-encodec
+seaborn
+pandas

@@ -26,7 +26,15 @@ class Inferencer:
             Loader=yaml.Loader
             ))
 
-        self.model = NaturalSpeech2(self.hp).to(self.device)
+        latent_info_dict = yaml.load(open(self.hp.Latent_Info_Path, 'r'), Loader=yaml.Loader)
+        self.latent_min = min([x['Min'] for x in latent_info_dict.values()])
+        self.latent_max = max([x['Max'] for x in latent_info_dict.values()])
+
+        self.model = NaturalSpeech2(
+            hyper_parameters= self.hp,
+            latent_min= self.latent_min,
+            latent_max= self.latent_max
+            ).to(self.device)
         
         self.Load_Checkpoint(checkpoint_path)
         self.batch_size = batch_size
@@ -43,6 +51,7 @@ class Inferencer:
                 token_dict= token_dict,
                 sample_rate= self.hp.Sound.Sample_Rate,
                 hop_size= self.hp.Sound.Frame_Shift,
+                use_between_padding= self.hp.Use_Between_Padding,
                 texts= texts,
                 references= references,
                 ),
@@ -77,19 +86,23 @@ class Inferencer:
         token_lengths = token_lengths.to(self.device, non_blocking=True)
         speech_prompts = speech_prompts.to(self.device, non_blocking=True)
         
-        audios, *_, latent_lengths = self.model(
+        diffusion_predictions, alignments, _ = self.model.Inference(
             tokens= tokens,
             token_lengths= token_lengths,
             speech_prompts= speech_prompts,
             ddim_steps= ddim_steps
             )
 
-        lengths = [
+        latent_lengths = [length for length in alignments.sum(dim= [1, 2]).long().cpu().numpy()]
+        audio_lengths = [
             length * self.hp.Sound.Frame_Shift
-            for length in latent_lengths.cpu().numpy()
+            for length in latent_lengths
             ]
         
-        audios = [audio[:length] for audio, length in zip(audios.cpu().numpy(), lengths)]
+        audios = [
+            audio[:length]
+            for audio, length in zip(diffusion_predictions.cpu().numpy(), audio_lengths)
+            ]
         
         return audios
 
@@ -120,5 +133,5 @@ class Inferencer:
                 ddim_steps= ddim_steps
                 )
             audio_list.extend(audios)
-            
+
         return audio_list

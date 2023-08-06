@@ -15,7 +15,7 @@ class VQVAE(nn.Module):
                  ckpt_path,
                  with_encoder=False):
         super(VQVAE, self).__init__()
-        ckpt = torch.load(ckpt_path)
+        ckpt = torch.load(ckpt_path, map_location= 'cpu')
         with open(config_path) as f:
             data = f.read()
         json_config = json.loads(data)
