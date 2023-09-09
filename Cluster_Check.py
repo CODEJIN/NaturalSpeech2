@@ -175,6 +175,11 @@ class Checker:
         speech_prompts = np.stack(speech_prompt_list, axis= 0)
         diffusion_prompts = np.stack(diffusion_prompt_list, axis= 0)
 
+        print(f'Speech prompt min: {speech_prompts.min()}')
+        print(f'Speech prompt max: {speech_prompts.max()}')
+        print(f'Diffusion prompt min: {diffusion_prompts.min()}')
+        print(f'Diffusion prompt max: {diffusion_prompts.max()}')
+
         speech_prompt_pca = PCA(n_components= 2)
         speech_prompt_pca.fit(speech_prompts)
         speech_prompt_pca = speech_prompt_pca.transform(speech_prompts)
@@ -226,4 +231,4 @@ if __name__ == '__main__':
         output_path= args.output_path
         )
     
-# python Cluster_Check.py -hp Hyper_Parameters.yaml -c ./results/VCTK_230805/Checkpoint/S_110000.pt -o ./S_110000.png -n 20
+# python Cluster_Check.py -hp Hyper_Parameters.yaml -c ./results/VCTK_230805/Checkpoint/S_157173.pt -o ./S_157173.png -n 20

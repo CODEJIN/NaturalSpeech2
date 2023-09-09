@@ -189,7 +189,7 @@ class Trainer:
             fmin= 0,
             fmax= None,
             center= False
-        )
+            )
 
         self.optimizer = torch.optim.AdamW(
             params= self.model.parameters(),

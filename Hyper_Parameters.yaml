@@ -71,20 +71,20 @@ Diffusion:
     Network_Prediction: 'Start'   # 'Start', 'Epsilon'
             
 
-Token_Path: 'F:/Datasets/22K.NaturalSpeech2_HifiCodec.VCTK/Token.yaml'
-Latent_Info_Path: 'F:/Datasets/22K.NaturalSpeech2_HifiCodec.VCTK/Latent_Info.yaml'
-Mel_Info_Path: 'F:/Datasets/22K.NaturalSpeech2_HifiCodec.VCTK/Mel_Info.yaml'
-F0_Info_Path: 'F:/Datasets/22K.NaturalSpeech2_HifiCodec.VCTK/F0_Info.yaml'
-Speaker_Info_Path: 'F:/Datasets/22K.NaturalSpeech2_HifiCodec.VCTK/Speaker_Info.yaml'
-Emotion_Info_Path: 'F:/Datasets/22K.NaturalSpeech2_HifiCodec.VCTK/Emotion_Info.yaml'
-Language_Info_Path: 'F:/Datasets/22K.NaturalSpeech2_HifiCodec.VCTK/Language_Info.yaml'
-Gender_Info_Path: 'F:/Datasets/22K.NaturalSpeech2_HifiCodec.VCTK/Gender_Info.yaml'
-Language_and_Gender_Info_by_Speaker_Path: 'F:/Datasets/22K.NaturalSpeech2_HifiCodec.VCTK/Language_and_Gender_Info_by_Speaker.yaml'
+Token_Path: 'F:/Datasets/22K.NaturalSpeech2.VCTK/Token.yaml'
+Latent_Info_Path: 'F:/Datasets/22K.NaturalSpeech2.VCTK/Latent_Info.yaml'
+Mel_Info_Path: 'F:/Datasets/22K.NaturalSpeech2.VCTK/Mel_Info.yaml'
+F0_Info_Path: 'F:/Datasets/22K.NaturalSpeech2.VCTK/F0_Info.yaml'
+Speaker_Info_Path: 'F:/Datasets/22K.NaturalSpeech2.VCTK/Speaker_Info.yaml'
+Emotion_Info_Path: 'F:/Datasets/22K.NaturalSpeech2.VCTK/Emotion_Info.yaml'
+Language_Info_Path: 'F:/Datasets/22K.NaturalSpeech2.VCTK/Language_Info.yaml'
+Gender_Info_Path: 'F:/Datasets/22K.NaturalSpeech2.VCTK/Gender_Info.yaml'
+Language_and_Gender_Info_by_Speaker_Path: 'F:/Datasets/22K.NaturalSpeech2.VCTK/Language_and_Gender_Info_by_Speaker.yaml'
 Train:
     Pattern_Cache: true
     # Pattern_Cache: false
     Train_Pattern:
-        Path: 'F:/Datasets/22K.NaturalSpeech2_HifiCodec.VCTK/Train'
+        Path: 'F:/Datasets/22K.NaturalSpeech2.VCTK/Train'
         Metadata_File: 'METADATA.PICKLE'
         Feature_Length:
             Min: 50
@@ -95,7 +95,7 @@ Train:
         Accumulated_Dataset_Epoch: 1 # This is to prevent slow down from torch.utils.data.DataLoader when the number of patterns is small.
         Augmentation_Ratio: 0.10
     Eval_Pattern:
-        Path: 'F:/Datasets/22K.NaturalSpeech2_HifiCodec.VCTK/Eval'
+        Path: 'F:/Datasets/22K.NaturalSpeech2.VCTK/Eval'
         Metadata_File: 'METADATA.PICKLE'
         Feature_Length:
             Min: 50
@@ -109,7 +109,7 @@ Train:
     Learning_Rate:
         Initial: 1.0e-4
         Warmup_Step: 4000
-        Diffusion_Lambda: 5.0
+        Diffusion_Lambda: 10.0
     ADAM:
         Beta1: 0.9
         Beta2: 0.999
@@ -140,16 +140,16 @@ Train:
 
 Inference_Batch_Size: 16
 
-Inference_Path: './results/VCTK_230805/Inference'
-Checkpoint_Path: './results/VCTK_230805/Checkpoint'
-Log_Path: './results/VCTK_230805/Log'
+Inference_Path: './results/VCTK_230909/Inference'
+Checkpoint_Path: './results/VCTK_230909/Checkpoint'
+Log_Path: './results/VCTK_230909/Log'
 
 Weights_and_Biases:
     # Use: true
     Use: false
     Project: 'NaturalSpeech2'
     Entity: 'codejin'
-    Name: 'VCTK_230805'
+    Name: 'VCTK_230909'
     Save_Checkpoint:
         Use: false
         Interval: 50000 # Unlike local, The capacity of WandB is small.

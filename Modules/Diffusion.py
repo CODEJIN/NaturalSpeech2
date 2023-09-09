@@ -281,16 +281,15 @@ class Diffusion_Network(torch.nn.Module):
             num_features= self.hp.Diffusion.Size
             )
         
-        self.pre_attention = LinearAttention(
-            query_channels= self.hp.Diffusion.Pre_Attention.Query_Size,
-            key_channels= self.hp.Speech_Prompter.Size, 
-            value_channels= self.hp.Speech_Prompter.Size,
-            calc_channels= self.hp.Diffusion.Pre_Attention.Query_Size,
-            num_heads= self.hp.Diffusion.Pre_Attention.Head
+        self.pre_attention = torch.nn.MultiheadAttention(
+            embed_dim= self.hp.Diffusion.Pre_Attention.Query_Size,
+            num_heads= self.hp.Diffusion.Pre_Attention.Head,
+            kdim= self.hp.Speech_Prompter.Size, 
+            vdim= self.hp.Speech_Prompter.Size,
             )
 
         self.pre_attention_query = torch.nn.Parameter(
-            torch.empty(1, self.hp.Diffusion.Pre_Attention.Query_Size, self.hp.Diffusion.Pre_Attention.Query_Token)
+            torch.empty(self.hp.Diffusion.Pre_Attention.Query_Token, 1, self.hp.Diffusion.Pre_Attention.Query_Size)
             )
         query_variance = math.sqrt(3.0) * math.sqrt(2.0 / (self.hp.Diffusion.Pre_Attention.Query_Size + self.hp.Diffusion.Pre_Attention.Query_Token))
         self.pre_attention_query.data.uniform_(-query_variance, query_variance)
@@ -346,16 +345,15 @@ class Diffusion_Network(torch.nn.Module):
         
         diffusion_steps = self.step_embedding(diffusion_steps)
         diffusion_step_residuals = diffusion_steps[:, 1:, :]
-
         diffusion_steps = self.step_ffn(diffusion_steps) # [Batch, Diffusion_d, 1]
-
         diffusion_steps = self.step_norm(diffusion_steps + diffusion_step_residuals)
 
-        speech_prompts = self.pre_attention(
-            queries= self.pre_attention_query.expand(speech_prompts.size(0), -1, -1),
-            keys= speech_prompts,
-            values= speech_prompts
-            )   # [Batch, Diffusion_d, Token_n]
+        with torch.cuda.amp.autocast(enabled= False):
+            speech_prompts = self.pre_attention(
+                query= self.pre_attention_query.expand(-1, speech_prompts.size(0), -1),
+                key= speech_prompts.permute(2, 0, 1),
+                value= speech_prompts.permute(2, 0, 1)
+                )[0].permute(1, 2, 0)   # [Batch, Diffusion_d, Token_n]
         
         skips_list = []
         for wavenet in self.wavenets:

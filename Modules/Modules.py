@@ -162,12 +162,12 @@ class NaturalSpeech2(torch.nn.Module):
             temperature= temperature
             )
 
-        diffusion_predictions = (diffusion_predictions + 1.0) / 2.0 * (self.latent_max - self.latent_min) + self.latent_min
+        diffusion_predictions = (diffusion_predictions.clamp(-1.0, 1.0) + 1.0) / 2.0 * (self.latent_max - self.latent_min) + self.latent_min
 
         # Performing VQ to correct the incomplete predictions of diffusion.
         *_, diffusion_predictions = self.hificodec.quantizer(diffusion_predictions)
         diffusion_predictions = [code.reshape(tokens.size(0), -1) for code in diffusion_predictions]
-        diffusion_predictions = torch.stack(diffusion_predictions, -1)
+        diffusion_predictions = torch.stack(diffusion_predictions, 2)
         diffusion_predictions = self.hificodec(diffusion_predictions).squeeze(1)
         
         return diffusion_predictions, alignments, f0s
@@ -197,7 +197,7 @@ class Encoder(torch.nn.Module):
                 ffn_kernel_size= self.hp.Encoder.Transformer.FFN.Kernel_Size,
                 dropout_rate= self.hp.Encoder.Transformer.FFN.Dropout_Rate,
                 )
-            for index in range(self.hp.Encoder.Transformer.Stack)
+            for _ in range(self.hp.Encoder.Transformer.Stack)
             ])
 
     def forward(
@@ -230,15 +230,8 @@ class Frame_Prior_Network(torch.nn.Module):
                 ffn_kernel_size= self.hp.Frame_Prior_Network.Transformer.FFN.Kernel_Size,
                 dropout_rate= self.hp.Frame_Prior_Network.Transformer.FFN.Dropout_Rate,
                 )
-            for index in range(self.hp.Frame_Prior_Network.Transformer.Stack)
+            for _ in range(self.hp.Frame_Prior_Network.Transformer.Stack)
             ])
-        
-        self.projection = Conv1d(
-            in_channels= self.hp.Encoder.Size,
-            out_channels= self.hp.Audio_Codec_Size,
-            kernel_size= 1,
-            w_init_gain= 'linear'
-            )
 
     def forward(
         self,
