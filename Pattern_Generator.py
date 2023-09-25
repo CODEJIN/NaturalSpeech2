@@ -1,14 +1,19 @@
 import torch
 import numpy as np
-import yaml, os, pickle, librosa, re, argparse, math
+import yaml, os, pickle, librosa, re, argparse, math, logging, sys, asyncio, json
 from vad import EnergyVAD
 from concurrent.futures import ThreadPoolExecutor as PE
 from random import shuffle
 from tqdm import tqdm
 from pysptk.sptk import rapt
 from typing import List, Tuple, Dict, Union, Optional
+from collections import defaultdict
 
-from phonemizer import phonemize
+from phonemizer import logger as phonemizer_logger
+from phonemizer.backend import BACKENDS
+from phonemizer.punctuation import Punctuation
+from phonemizer.separator import default_separator
+from phonemizer.phonemize import _phonemize
 from unidecode import unidecode
 
 from meldataset import mel_spectrogram
@@ -17,8 +22,31 @@ from hificodec.vqvae import VQVAE
 
 from Arg_Parser import Recursive_Parse
 
+logging.basicConfig(
+    level=logging.INFO, stream=sys.stdout,
+    format= '%(asctime)s (%(module)s:%(lineno)d) %(levelname)s: %(message)s'
+    )
 using_extension = [x.upper() for x in ['.wav', '.m4a', '.flac', '.flac']]
 regex_checker = re.compile('[가-힣A-Za-z,.?!\'\-\s]+')
+
+logger = phonemizer_logger.get_logger()
+logger.setLevel(logging.CRITICAL)
+phonemizer_dict = {
+    key: BACKENDS['espeak'](
+        language= language,
+        punctuation_marks= Punctuation.default_marks(),
+        preserve_punctuation= True,
+        with_stress= True,
+        tie= False,
+        language_switch= 'remove-flags',
+        words_mismatch= 'ignore',
+        logger= logger
+        )
+    for key, language in [
+        ('English', 'en-us'),
+        ('Korean', 'ko')
+        ]
+    }
 
 if __name__ == '__main__':
     if not torch.cuda.is_available():
@@ -78,48 +106,92 @@ def expand_abbreviations(text: str):
 
     return text
 
-def Phonemize(texts: Union[str, List[str]], language: str):
+def Phonemize(texts: Union[str, List[str]], language: str, chunk: int= 5000):
     if type(texts) == str:
         texts = [texts]
 
     if language == 'English':
-        language = 'en-us'
-        # English cleaners 2
         texts = [text.lower() for text in texts]
         texts = [expand_abbreviations(text) for text in texts]
-    elif language == 'Korean':
-        language = 'ko'
 
-    pronunciations = phonemize(
-        texts,
-        language= language,
-        backend='espeak',
-        strip=True,
-        preserve_punctuation=True,
-        with_stress= True,
-        njobs=4
-        )
-    pronunciations = [re.sub(whitespace_re, ' ', pronunciation) for pronunciation in pronunciations]
+    pronunciations = []
+    for index in tqdm(range(0, len(texts), chunk), desc= 'Phonemize'):
+        pronunciations_chunk = _phonemize(
+            backend= phonemizer_dict[language],
+            text= texts[index:index + chunk],
+            separator= default_separator,
+            strip= True,
+            njobs= 4,
+            prepend_text= False,
+            preserve_empty_lines= False
+            )
+        pronunciations.extend([
+            re.sub(whitespace_re, ' ', pronunciation)
+            for pronunciation in pronunciations_chunk
+            ])
 
     return pronunciations
 
-def Pattern_Generate(
-    path,
+def Audio_Stack(audios: List[np.ndarray], max_length: Optional[int]= None) -> np.ndarray:
+    max_audio_length = max_length or max([audio.shape[0] for audio in audios])
+    audios = np.stack(
+        [np.pad(audio, [0, max_audio_length - audio.shape[0]], constant_values= 0.0) for audio in audios],
+        axis= 0
+        )
+
+    return audios
+
+async def Read_audio_and_F0(path: str, sample_rate: int, hop_size: int, f0_min: float, f0_max: float):
+    loop = asyncio.get_event_loop()
+
+    def Read():
+        audio, _ = librosa.load(path, sr=sample_rate)
+        audio = librosa.util.normalize(audio) * 0.95
+        audio = vad.apply_vad(audio[None])[0]
+
+        audio = audio[:audio.shape[0] - (audio.shape[0] % hop_size)]
+
+        f0 = rapt(
+            x= audio * 32768,
+            fs= sample_rate,
+            hopsize= hop_size,
+            min= f0_min,
+            max= f0_max,
+            otype= 1
+            )
+    
+        return audio, audio.shape[0], f0
+    
+    return await loop.run_in_executor(None, Read)
+
+
+async def Pattern_Generate(
+    paths,
+    num_mels: int,
     sample_rate: int,
     hop_size: int,
-    num_mels: int,
     f0_min: int,
     f0_max: int
     ):
-    audio, _ = librosa.load(path, sr= sample_rate)
-    audio = librosa.util.normalize(audio) * 0.95
-    audio = vad.apply_vad(audio[None])[0]
-    audio = audio[:audio.shape[0] - (audio.shape[0] % hop_size)]
-    audio_tensor = torch.from_numpy(audio).to(device).float()[None]
+    tasks = [
+        Read_audio_and_F0(
+            path= path,
+            sample_rate= sample_rate,
+            hop_size= hop_size,
+            f0_min= f0_min,
+            f0_max= f0_max
+            )
+        for path in paths
+        ]
+    results = await asyncio.gather(*tasks)
+    audios, audio_lengths, f0s = zip(*results)
+    latent_lengths: List[int] = [length // hop_size for length in audio_lengths]
+
+    audios_tensor = torch.from_numpy(Audio_Stack(audios, max_length= max(audio_lengths))).to(device).float()
     with torch.inference_mode():
-        latent = hificodec.encode(audio_tensor)[0].T.cpu().numpy() # [4, Audio_t / 320]
-        mel = mel_spectrogram(
-            y= audio_tensor,
+        latents = hificodec.encode(audios_tensor).permute(0, 2, 1).cpu().numpy() # [Batch, 4, Audio_t / 320]
+        mels = mel_spectrogram(
+            y= audios_tensor,
             n_fft= hop_size * 4,
             num_mels= num_mels,
             sampling_rate= sample_rate,
@@ -128,74 +200,109 @@ def Pattern_Generate(
             fmin= 0,
             fmax= None,
             center= False
-            )[0].cpu().numpy()
-
-    f0 = rapt(
-        x= audio * 32768,
-        fs= sample_rate,
-        hopsize= hop_size,
-        min= f0_min,
-        max= f0_max,
-        otype= 1
-        )
+            ).cpu().numpy() # [Batch, 80, Audio_t / 320]
+    latents: List[np.ndarray] = [
+        latent[:, :length]
+        for latent, length in zip(latents, latent_lengths)
+        ]
+    mels: List[np.ndarray] = [
+        mel[:, :length]
+        for mel, length in zip(mels, latent_lengths)
+        ]
     
-    if abs(latent.shape[1] - f0.shape[0]) > 1:
-        return None, None, None
-    elif latent.shape[1] > f0.shape[0]:
-        f0 = np.pad(f0, [0, latent.shape[1] - f0.shape[0]], constant_values= 0.0)
-    else:   # mel.shape[1] < f0.shape[0]:
-        audio = np.pad(audio, [0, (f0.shape[0] - latent.shape[1]) * hop_size])
-        latent = np.pad(latent, [[0, 0], [0, f0.shape[0] - latent.shape[1]]], mode= 'edge')
+    latents_trim: List[np.ndarray] = []
+    mels_trim: List[np.ndarray] = []
+    f0s_trim: List[np.ndarray] = []
+    for latent, mel, f0 in zip(latents, mels, f0s):
+        if abs(latent.shape[1] - f0.shape[0]) > 1:
+            latents_trim.append(None)
+            mels_trim.append(None)
+            f0s_trim.append(None)
+            continue
+        elif latent.shape[1] > f0.shape[0]:
+            f0 = np.pad(f0, [0, latent.shape[1] - f0.shape[0]], constant_values= 0.0)
+        else:   # mel.shape[1] < f0.shape[0]:
+            latent = np.pad(latent, [[0, 0], [0, f0.shape[0] - latent.shape[1]]], mode= 'edge')
 
-    if mel.shape[1] - f0.shape[0] < 0 or mel.shape[1] - f0.shape[0] > 1:
-        return None, None, None
-    else:
-        mel = mel[:, :f0.shape[0]]
+        if mel.shape[1] - f0.shape[0] < 0 or mel.shape[1] - f0.shape[0] > 1:
+            latents_trim.append(None)
+            mels_trim.append(None)
+            f0s_trim.append(None)
+            continue
+        else:
+            mel = mel[:, :f0.shape[0]]
+
+        latents_trim.append(latent.astype(np.int16))
+        mels_trim.append(mel.astype(np.float16))
+        f0s_trim.append(f0.astype(np.float16))
     
-    return latent.astype(np.int16), mel.astype(np.float16), f0.astype(np.float16)
+    return latents_trim, mels_trim, f0s_trim
 
-def Pattern_File_Generate(path: str, speaker: str, emotion: str, language: str, gender: str, dataset: str, text: str, pronunciation: str, tag: str='', eval: bool= False):
+def Pattern_File_Generate(
+    paths: List[str],
+    speakers: List[str],
+    emotions: List[str],
+    languages: List[str],
+    genders: List[str],
+    datasets: List[str],
+    texts: List[str],
+    pronunciations: List[str],
+    tags: Optional[List[str]]= None,
+    eval: bool= False
+    ):
     pattern_path = hp.Train.Eval_Pattern.Path if eval else hp.Train.Train_Pattern.Path
 
-    file = '{}.{}{}.PICKLE'.format(
+    tags = tags or [''] * len(paths)
+    files = [
+        '{}.{}{}.PICKLE'.format(
         speaker if dataset in speaker else '{}.{}'.format(dataset, speaker),
         '{}.'.format(tag) if tag != '' else '',
         os.path.splitext(os.path.basename(path))[0]
         ).upper()
-    if any([
-        os.path.exists(os.path.join(x, dataset, speaker, file).replace("\\", "/"))
-        for x in [hp.Train.Eval_Pattern.Path, hp.Train.Train_Pattern.Path]
-        ]):
+        for path, speaker, dataset, tag in zip(paths, speakers, datasets, tags)
+        ]
+    files = [
+        os.path.join(pattern_path, dataset, speaker, file).replace('\\', '/')
+        for file, speaker, dataset in zip(files, speakers, datasets)
+        if not any([
+            os.path.exists(os.path.join(x, dataset, speaker, file).replace("\\", "/"))
+            for x in [hp.Train.Eval_Pattern.Path, hp.Train.Train_Pattern.Path]
+            ])
+        ]
+    
+    if len(files) == 0:
         return
-    file = os.path.join(pattern_path, dataset, speaker, file).replace("\\", "/")
 
-    latent, mel, f0 = Pattern_Generate(
-        path= path,
+    latents, mels, f0s = asyncio.run(Pattern_Generate(
+        paths= paths,
+        num_mels= hp.Sound.Mel_Dim,
         sample_rate= hp.Sound.Sample_Rate,
         hop_size= hp.Sound.Frame_Shift,
-        num_mels= hp.Sound.Mel_Dim,
         f0_min= hp.Sound.F0_Min,
         f0_max= hp.Sound.F0_Max
-        )
-    if latent is None:
-        return
-     
-    new_Pattern_dict = {
-        'Latent': latent,
-        'Mel': mel,
-        'F0': f0,
-        'Speaker': speaker,
-        'Emotion': emotion,
-        'Language': language,
-        'Gender': gender,
-        'Dataset': dataset,
-        'Text': text,
-        'Pronunciation': pronunciation
-        }
-
-    os.makedirs(os.path.join(pattern_path, dataset, speaker).replace('\\', '/'), exist_ok= True)
-    with open(file, 'wb') as f:
-        pickle.dump(new_Pattern_dict, f, protocol=4)
+        ))
+    
+    for file, latent, mel, f0, speaker, emotion, language, gender, dataset, text, pronunciation in zip(
+        files, latents, mels, f0s, speakers, emotions, languages, genders, datasets, texts, pronunciations
+        ):
+        if latent is None:
+            continue
+        new_pattern_dict = {
+            'Latent': latent,
+            'Mel': mel,
+            'F0': f0,
+            'Speaker': speaker,
+            'Emotion': emotion,
+            'Language': language,
+            'Gender': gender,
+            'Dataset': dataset,
+            'Text': text,
+            'Pronunciation': pronunciation
+            }
+        os.makedirs(os.path.join(pattern_path, dataset, speaker).replace('\\', '/'), exist_ok= True)
+        with open(file, 'wb') as f:
+            pickle.dump(new_pattern_dict, f, protocol=4)
+        del new_pattern_dict
 
 def Selvas_Info_Load(path: str):
     '''
@@ -256,9 +363,9 @@ def Selvas_Info_Load(path: str):
             elif index > 300 and index < 401:
                 emotion_dict[path] = 'Angry'
             else:
-                raise NotImplementedError('Unknown emotion index: {}'.format(index))
+                raise NotImplementedError(f'Unknown emotion index: {index}')
         else:
-            raise NotImplementedError('Unknown speaker: {}'.format(speaker_dict[path]))
+            raise NotImplementedError(f'Unknown speaker: {speaker_dict[path]}')
 
     language_dict = {path: 'Korean' for path in paths}
 
@@ -310,7 +417,7 @@ def Selvas_Info_Load(path: str):
         for path, speaker in speaker_dict.items()
         }
 
-    print('Selvas info generated: {}'.format(len(paths)))
+    print(f'Selvas info generated: {len(paths)}')
     return paths, text_dict, pronunciation_dict, speaker_dict, emotion_dict, language_dict, gender_dict
 
 def KSS_Info_Load(path: str):
@@ -352,16 +459,30 @@ def KSS_Info_Load(path: str):
         for path in paths
         }
 
-    print('KSS info generated: {}'.format(len(paths)))
+    print(f'KSS info generated: {len(paths)}')
     return paths, text_dict, pronunciation_dict, speaker_dict, emotion_dict, language_dict, gender_dict
 
-def AIHub_Info_Load(path: str):
+def AIHub_Info_Load(path: str, n_sample_by_speaker: Optional[int]= None):
+    if os.path.exists('AIHub_Load.pickle'):
+        pickled_info_dict = pickle.load(open('AIHub_Load.pickle', 'rb'))
+        paths = pickled_info_dict['Paths']
+        text_dict = pickled_info_dict['Text_Dict']
+        pronunciation_dict = pickled_info_dict['Pronunciation_Dict']
+        speaker_dict = pickled_info_dict['Speaker_Dict']
+        emotion_dict = pickled_info_dict['Emotion_Dict']
+        language_dict = pickled_info_dict['Language_Dict']
+        gender_dict = pickled_info_dict['Gender_Dict']
+        
+        print(f'AIHub info generated: {len(paths)}')
+        return paths, text_dict, pronunciation_dict, speaker_dict, emotion_dict, language_dict, gender_dict
+
     emotion_label_dict = {
         'Neutrality': 'Neutral'
         }
 
     skip_info_keys = []
     info_dict = {}
+    n_sample_by_speaker_dict = defaultdict(int)
     for root, _, files in os.walk(path):
         for file in files:
             key, extension = os.path.splitext(file)
@@ -382,12 +503,25 @@ def AIHub_Info_Load(path: str):
                 info_dict[key]['Speaker'] = 'AIHub_{}'.format(pattern_info['화자정보']['SpeakerName'])
                 info_dict[key]['Gender'] = pattern_info['화자정보']['Gender']
                 info_dict[key]['Emotion'] = emotion_label_dict[pattern_info['화자정보']['Emotion']]
+
+                if not n_sample_by_speaker is None and n_sample_by_speaker_dict[info_dict[key]['Speaker']] >= n_sample_by_speaker:
+                    skip_info_keys.append(key)
+                    continue
+                n_sample_by_speaker_dict[info_dict[key]['Speaker']] += 1
             else:
-                raise ValueError(f'Unsupported file type: {path}')
+                # raise ValueError(f'Unsupported file type: {path}')
+                logging.info(f'Unsupported file type skipped: {path}')
+                skip_info_keys.append(key)
+                continue
 
     for key in skip_info_keys:
         info_dict.pop(key, None)
     
+    info_dict = {
+        key: value
+        for key, value in info_dict.items()
+        if all([x in value.keys() for x in ['Path', 'Text', 'Speaker', 'Gender', 'Emotion']])
+        }
     paths = [info['Path'] for info in info_dict.values()]
     text_dict = {
         info['Path']: info['Text']  for info in info_dict.values()
@@ -412,7 +546,17 @@ def AIHub_Info_Load(path: str):
         info['Path']: info['Gender']  for info in info_dict.values()
         }
 
-    print('AIHub info generated: {}'.format(len(paths)))
+    print(f'AIHub info generated: {len(paths)}')
+    with open('AIHub_Load.pickle', 'wb') as f:
+        pickle.dump({
+            'Paths': paths,
+            'Text_Dict': text_dict,
+            'Pronunciation_Dict': pronunciation_dict,
+            'Speaker_Dict': speaker_dict,
+            'Emotion_Dict': emotion_dict,
+            'Language_Dict': language_dict,
+            'Gender_Dict': gender_dict
+            }, f, protocol= 4)
     return paths, text_dict, pronunciation_dict, speaker_dict, emotion_dict, language_dict, gender_dict
 
 def Basic_Info_Load(
@@ -484,7 +628,7 @@ def Basic_Info_Load(
             for path, pronunciation in zip(language_paths, language_pronunciations)
             })
 
-    print('{} info generated: {}'.format(dataset_label, len(paths)))
+    print(f'{dataset_label} info generated: {len(paths)}')
     return paths, text_dict, pronunciation_dict, speaker_dict, emotion_dict, language_dict, gender_dict
 
 
@@ -646,11 +790,24 @@ def VCTK_Info_Load(path: str):
         for path, speaker in speaker_dict.items()
         }
 
-    print('VCTK info generated: {}'.format(len(paths)))
+    print(f'VCTK info generated: {len(paths)}')
 
     return paths, text_dict, pronunciation_dict, speaker_dict, emotion_dict, language_dict, gender_dict
 
-def Libri_Info_Load(path: str):
+def Libri_Info_Load(path: str, n_sample_by_speaker: Optional[int]= None):
+    if os.path.exists('Libri_Load.pickle'):
+        pickled_info_dict = pickle.load(open('Libri_Load.pickle', 'rb'))
+        paths = pickled_info_dict['Paths']
+        text_dict = pickled_info_dict['Text_Dict']
+        pronunciation_dict = pickled_info_dict['Pronunciation_Dict']
+        speaker_dict = pickled_info_dict['Speaker_Dict']
+        emotion_dict = pickled_info_dict['Emotion_Dict']
+        language_dict = pickled_info_dict['Language_Dict']
+        gender_dict = pickled_info_dict['Gender_Dict']
+        
+        print(f'Libri info generated: {len(paths)}')
+        return paths, text_dict, pronunciation_dict, speaker_dict, emotion_dict, language_dict, gender_dict
+
     paths = []
     for root, _, files in os.walk(path):
         for file in files:
@@ -661,23 +818,42 @@ def Libri_Info_Load(path: str):
 
     text_dict = {}
     for file_path in paths:
-        text = Text_Filtering(unidecode(open('{}.normalized.txt'.format(os.path.splitext(file_path)[0]), 'r', encoding= 'utf-8-sig').readlines()[0]))
+        text = Text_Filtering(unidecode(open(f'{os.path.splitext(file_path)[0]}.normalized.txt', 'r', encoding= 'utf-8-sig').readlines()[0]))
         if text is None:
             continue
         
         text_dict[file_path] = text
 
     paths = list(text_dict.keys())
-    pronunciations = Phonemize(
-        texts= [text_dict[path] for path in paths],
-        language= 'English'
-        )    
-    pronunciation_dict = {path: pronunciation for path, pronunciation in zip(paths, pronunciations)}
 
     speaker_dict = {
         path: 'Libri.{:04d}'.format(int(path.split('/')[-3].strip().upper()))
         for path in paths
         }
+
+    if not n_sample_by_speaker is None:
+        n_sample_by_speaker_dict = defaultdict(int)
+        paths_sample = []
+        text_dict_sample = {}
+        speaker_dict_sample = {}    
+        shuffle(paths)
+        for path in paths:
+            speaker = speaker_dict[path]
+            if n_sample_by_speaker_dict[speaker] >= n_sample_by_speaker:
+                continue
+            paths_sample.append(paths)
+            text_dict_sample[path] = text_dict[path]
+            speaker_dict_sample[path] = speaker_dict[path]
+            n_sample_by_speaker_dict[speaker] += 1
+        paths_sample = paths
+        text_dict = text_dict_sample
+        speaker_dict = speaker_dict_sample
+
+    pronunciations = Phonemize(
+        texts= [text_dict[path] for path in paths],
+        language= 'English'
+        )    
+    pronunciation_dict = {path: pronunciation for path, pronunciation in zip(paths, pronunciations)}
 
     emotion_dict = {path: 'Neutral' for path in paths}
     language_dict = {path: 'English' for path in paths}
@@ -691,7 +867,17 @@ def Libri_Info_Load(path: str):
         for path, speaker in speaker_dict.items()
         }
 
-    print('Libri info generated: {}'.format(len(paths)))
+    print(f'Libri info generated: {len(paths)}')
+    with open('Libri_Load.pickle', 'wb') as f:
+        pickle.dump({
+            'Paths': paths,
+            'Text_Dict': text_dict,
+            'Pronunciation_Dict': pronunciation_dict,
+            'Speaker_Dict': speaker_dict,
+            'Emotion_Dict': emotion_dict,
+            'Language_Dict': language_dict,
+            'Gender_Dict': gender_dict
+            }, f, protocol= 4)
     return paths, text_dict, pronunciation_dict, speaker_dict, emotion_dict, language_dict, gender_dict
 
 def LJ_Info_Load(path: str):
@@ -709,7 +895,7 @@ def LJ_Info_Load(path: str):
         text = Text_Filtering(unidecode(line[2].strip()))
         if text is None:
             continue
-        wav_path = os.path.join(path, 'wavs', '{}.wav'.format(line[0]))
+        wav_path = os.path.join(path, 'wavs', f'{line[0]}.wav')
         
         text_dict[wav_path] = text
 
@@ -729,24 +915,42 @@ def LJ_Info_Load(path: str):
     language_dict = {path: 'English' for path in paths}
     gender_dict = {path: 'Female' for path in paths}
 
-    print('LJ info generated: {}'.format(len(paths)))
+    print(f'LJ info generated: {len(paths)}')
     return paths, text_dict, pronunciation_dict, speaker_dict, emotion_dict, language_dict, gender_dict
 
-def MLS_Info_Load(path: str):
+def MLS_Info_Load(path: str, n_sample_by_speaker: Optional[int]= None):
+    if os.path.exists('MLS_Load.pickle'):
+        pickled_info_dict = pickle.load(open('MLS_Load.pickle', 'rb'))
+        paths = pickled_info_dict['Paths']
+        text_dict = pickled_info_dict['Text_Dict']
+        pronunciation_dict = pickled_info_dict['Pronunciation_Dict']
+        speaker_dict = pickled_info_dict['Speaker_Dict']
+        emotion_dict = pickled_info_dict['Emotion_Dict']
+        language_dict = pickled_info_dict['Language_Dict']
+        gender_dict = pickled_info_dict['Gender_Dict']
+        
+        print(f'MLS info generated: {len(paths)}')
+        return paths, text_dict, pronunciation_dict, speaker_dict, emotion_dict, language_dict, gender_dict
+
+    n_sample_by_speaker_dict = defaultdict(int)
     paths, texts, speakers = [], [], []
     for partition in ['dev', 'test', 'train']:
         for line in open(os.path.join(path, partition, 'transcripts.txt').replace('\\', '/'), 'r', encoding= 'utf-8-sig').readlines():
             file_path, text = line.strip().split('\t')
             speaker, book_id, _ = file_path.strip().split('_')
+            if not n_sample_by_speaker is None and n_sample_by_speaker_dict[speaker] >= n_sample_by_speaker:
+                continue
+
             file_path = os.path.join(path, partition, 'audio', speaker, book_id, f'{file_path}.opus')
             if not os.path.exists(file_path):
                 continue                        
             text = Text_Filtering(unidecode(text))
             if text is None:
-                continue            
+                continue
             paths.append(file_path)
             texts.append(text)
             speakers.append(int(speaker))
+            n_sample_by_speaker_dict[speaker] += 1
 
     text_dict = {
         path: text
@@ -778,7 +982,17 @@ def MLS_Info_Load(path: str):
         for path, speaker in zip(paths, speakers)
         }
 
-    print('MLS info generated: {}'.format(len(paths)))
+    print(f'MLS info generated: {len(paths)}')
+    with open('MLS_Load.pickle', 'wb') as f:
+        pickle.dump({
+            'Paths': paths,
+            'Text_Dict': text_dict,
+            'Pronunciation_Dict': pronunciation_dict,
+            'Speaker_Dict': speaker_dict,
+            'Emotion_Dict': emotion_dict,
+            'Language_Dict': language_dict,
+            'Gender_Dict': gender_dict
+            }, f, protocol= 4)
     return paths, text_dict, pronunciation_dict, speaker_dict, emotion_dict, language_dict, gender_dict
 
 def Split_Eval(paths: List[str], eval_ratio: float= 0.001, min_eval: int= 1):
@@ -786,6 +1000,7 @@ def Split_Eval(paths: List[str], eval_ratio: float= 0.001, min_eval: int= 1):
     index = max(int(len(paths) * eval_ratio), min_eval)
     return paths[index:], paths[:index]
 
+@torch.inference_mode()
 def Metadata_Generate(eval: bool= False):
     pattern_path = hp.Train.Eval_Pattern.Path if eval else hp.Train.Train_Pattern.Path
     metadata_File = hp.Train.Eval_Pattern.Metadata_File if eval else hp.Train.Train_Pattern.Metadata_File
@@ -800,6 +1015,7 @@ def Metadata_Generate(eval: bool= False):
     language_and_gender_dict_by_speaker = {}
 
     new_metadata_dict = {
+        'Mel_Dim': hp.Sound.Mel_Dim,
         'Frame_Shift': hp.Sound.Frame_Shift,
         'Sample_Rate': hp.Sound.Sample_Rate,
         'File_List': [],
@@ -828,7 +1044,7 @@ def Metadata_Generate(eval: bool= False):
             try:
                 if not all([
                     key in pattern_dict.keys()
-                    for key in ('Latent', 'F0', 'Speaker', 'Emotion', 'Language', 'Gender', 'Dataset', 'Text', 'Pronunciation')
+                    for key in ('Latent', 'Mel', 'F0', 'Speaker', 'Emotion', 'Language', 'Gender', 'Dataset', 'Text', 'Pronunciation')
                     ]):
                     continue
                 new_metadata_dict['Latent_Length_Dict'][file] = pattern_dict['Latent'].shape[1]
@@ -866,7 +1082,7 @@ def Metadata_Generate(eval: bool= False):
                     'Gender': pattern_dict['Gender']
                     }
             except:
-                print('File \'{}\' is not correct pattern file. This file is ignored.'.format(file))
+                print(f'File \'{file}\' is not correct pattern file. This file is ignored.')
 
             files_tqdm.update(1)
 
@@ -965,7 +1181,8 @@ if __name__ == '__main__':
 
     parser.add_argument("-evalr", "--eval_ratio", default= 0.001, type= float)
     parser.add_argument("-evalm", "--eval_min", default= 1, type= int)
-    parser.add_argument("-mw", "--max_worker", default= 1, required=False, type= int)
+    parser.add_argument("-batch", "--batch_size", default= 32, required=False, type= int)
+    parser.add_argument("-sample", "--sample", required=False, type= int)
 
     args = parser.parse_args()
 
@@ -1015,7 +1232,8 @@ if __name__ == '__main__':
 
     if not args.aihub_path is None:
         aihub_paths, aihub_text_dict, aihub_pronunciation_dict, aihub_speaker_dict, aihub_emotion_dict, aihub_language_dict, aihub_gender_dict = AIHub_Info_Load(
-            path= args.aihub_path
+            path= args.aihub_path,
+            n_sample_by_speaker= args.sample
             )
         aihub_paths = Split_Eval(aihub_paths, args.eval_ratio, args.eval_min)
         train_paths.extend(aihub_paths[0])
@@ -1046,7 +1264,10 @@ if __name__ == '__main__':
         tag_dict.update({path: '' for paths in vctk_paths for path in paths})
 
     if not args.libri_path is None:
-        libri_paths, libri_text_dict, libri_pronunciation_dict, libri_speaker_dict, libri_emotion_dict, libri_language_dict, libri_gender_dict = Libri_Info_Load(path= args.libri_path)
+        libri_paths, libri_text_dict, libri_pronunciation_dict, libri_speaker_dict, libri_emotion_dict, libri_language_dict, libri_gender_dict = Libri_Info_Load(
+            path= args.libri_path,
+            n_sample_by_speaker= args.sample
+            )
         libri_paths = Split_Eval(libri_paths, args.eval_ratio, args.eval_min)
         train_paths.extend(libri_paths[0])
         eval_paths.extend(libri_paths[1])
@@ -1074,7 +1295,10 @@ if __name__ == '__main__':
         tag_dict.update({path: '' for paths in lj_paths for path in paths})
 
     if not args.mls_path is None:
-        mls_paths, mls_text_dict, mls_pronunciation_dict, mls_speaker_dict, mls_emotion_dict, mls_language_dict, mls_gender_dict = MLS_Info_Load(path= args.mls_path)
+        mls_paths, mls_text_dict, mls_pronunciation_dict, mls_speaker_dict, mls_emotion_dict, mls_language_dict, mls_gender_dict = MLS_Info_Load(
+            path= args.mls_path,
+            n_sample_by_speaker= args.sample
+            )
         mls_paths = Split_Eval(mls_paths, args.eval_ratio, args.eval_min)
         train_paths.extend(mls_paths[0])
         eval_paths.extend(mls_paths[1])
@@ -1090,71 +1314,52 @@ if __name__ == '__main__':
     # if len(train_paths) == 0 or len(eval_paths) == 0:
     #     raise ValueError('Total info count must be bigger than 0.')
 
-    train_paths = sorted(train_paths)
-    eval_paths = sorted(eval_paths)
+    logging.info('Sorting...')
+    train_paths, eval_paths = sorted(train_paths), sorted(eval_paths)
+    logging.info('Sorting...Done')
 
-    tokens = set([
-        token
-        for phonemes in pronunciation_dict.values()
-        for token in phonemes
-        ])
+    logging.info('Token dict generating')
+    tokens = set()
+    for phonemes in pronunciation_dict.values():
+        tokens = tokens.union(set(phonemes))
+    tokens = sorted(list(tokens))
     token_dict = Token_dict_Generate(tokens= tokens)
+    logging.info('Token dict generating...Done')
 
-    if device == 'cuda:0' and args.max_worker > 1:
-        args.max_worker = 1
-        print('If using CUDA, the max_worker must be set to 1 to prevent CUDA memory management issues.')
-
-
-    with PE(max_workers = args.max_worker) as pe:
-        for _ in tqdm(
-            pe.map(
-                lambda params: Pattern_File_Generate(*params),
-                [
-                    (
-                        path,
-                        speaker_dict[path],
-                        emotion_dict[path],
-                        language_dict[path],
-                        gender_dict[path],
-                        dataset_dict[path],
-                        text_dict[path],
-                        pronunciation_dict[path],
-                        tag_dict[path],
-                        False
-                        )
-                    for path in train_paths
-                    ]
-                ),
-            total= len(train_paths)
-            ):
-            pass
-        for _ in tqdm(
-            pe.map(
-                lambda params: Pattern_File_Generate(*params),
-                [
-                    (
-                        path,
-                        speaker_dict[path],
-                        emotion_dict[path],
-                        language_dict[path],
-                        gender_dict[path],
-                        dataset_dict[path],
-                        text_dict[path],
-                        pronunciation_dict[path],
-                        tag_dict[path],
-                        True
-                        )
-                    for path in eval_paths
-                    ]
-                ),
-            total= len(eval_paths)
-            ):
-            pass
+    for index in tqdm(range(0, len(train_paths), args.batch_size)):
+        batch_paths = train_paths[index:index + args.batch_size]
+        Pattern_File_Generate(
+            paths= batch_paths,
+            speakers= [speaker_dict[path] for path in batch_paths],
+            emotions= [emotion_dict[path] for path in batch_paths],
+            languages= [language_dict[path] for path in batch_paths],
+            genders= [gender_dict[path] for path in batch_paths],
+            datasets= [dataset_dict[path] for path in batch_paths],
+            texts= [text_dict[path] for path in batch_paths],
+            pronunciations= [pronunciation_dict[path] for path in batch_paths],
+            tags= [tag_dict[path] for path in batch_paths],
+            eval= False
+            )
+    for index in tqdm(range(0, len(eval_paths), args.batch_size)):
+        batch_paths = eval_paths[index:index + args.batch_size]
+        Pattern_File_Generate(
+            paths= batch_paths,
+            speakers= [speaker_dict[path] for path in batch_paths],
+            emotions= [emotion_dict[path] for path in batch_paths],
+            languages= [language_dict[path] for path in batch_paths],
+            genders= [gender_dict[path] for path in batch_paths],
+            datasets= [dataset_dict[path] for path in batch_paths],
+            texts= [text_dict[path] for path in batch_paths],
+            pronunciations= [pronunciation_dict[path] for path in batch_paths],
+            tags= [tag_dict[path] for path in batch_paths],
+            eval= True
+            )
 
     Metadata_Generate()
     Metadata_Generate(eval= True)
 
 # python Pattern_Generator.py -hp Hyper_Parameters.yaml -lj D:\Rawdata\LJSpeech
 # python Pattern_Generator.py -hp Hyper_Parameters.yaml -vctk D:\Rawdata\VCTK092
-# python Pattern_Generator.py -hp Hyper_Parameters.yaml -mls D:\Rawdata\mls_english_opus
+# python Pattern_Generator.py -hp Hyper_Parameters.yaml -mls D:\Rawdata\mls_english_opus -sample 100
 # python Pattern_Generator.py -hp Hyper_Parameters.yaml -libri D:\Rawdata\LibriTTS
+# python Pattern_Generator.py -hp Hyper_Parameters.yaml -aihub "E:/014.다화자 음성합성 데이터/01.데이터/2.Validation" -sample 100
