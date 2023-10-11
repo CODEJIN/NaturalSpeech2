@@ -291,17 +291,23 @@ def Pattern_File_Generate(
         ).upper()
         for path, speaker, dataset, tag in zip(paths, speakers, datasets, tags)
         ]
-    files = [
-        os.path.join(pattern_path, dataset, speaker, file).replace('\\', '/')
-        for file, speaker, dataset in zip(files, speakers, datasets)
+    non_existed_patterns = [
+        (path, file, speaker, emotion, language, gender, dataset, text, pronunciation)
+        for path, file, speaker, emotion, language, gender, dataset, text, pronunciation in zip(
+            paths, files, speakers, emotions, languages, genders, datasets, texts, pronunciations
+            )
         if not any([
             os.path.exists(os.path.join(x, dataset, speaker, file).replace("\\", "/"))
             for x in [hp.Train.Eval_Pattern.Path, hp.Train.Train_Pattern.Path]
             ])
         ]
-    
-    if len(files) == 0:
+    if len(non_existed_patterns) == 0:
         return
+    paths, files, speakers, emotions, languages, genders, datasets, texts, pronunciations = zip(*non_existed_patterns)
+    files = [
+        os.path.join(pattern_path, dataset, speaker, file).replace('\\', '/')
+        for file, speaker, dataset in zip(files, speakers, datasets)
+        ]
 
     latents, mels, f0s = asyncio.run(Pattern_Generate(
         paths= paths,
