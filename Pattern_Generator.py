@@ -26,7 +26,7 @@ logging.basicConfig(
     level=logging.INFO, stream=sys.stdout,
     format= '%(asctime)s (%(module)s:%(lineno)d) %(levelname)s: %(message)s'
     )
-using_extension = [x.upper() for x in ['.wav', '.m4a', '.flac', '.flac']]
+using_extension = [x.upper() for x in ['.wav', '.m4a', '.flac']]
 regex_checker = re.compile('[가-힣A-Za-z,.?!\'\-\s]+')
 
 logger = phonemizer_logger.get_logger()
@@ -106,7 +106,7 @@ def expand_abbreviations(text: str):
 
     return text
 
-def Phonemize(texts: Union[str, List[str]], language: str, chunk: int= 5000):
+def Phonemize(texts: Union[str, List[str]], language: str, chunk: int= 5000, use_tqdm: bool= False):
     if type(texts) == str:
         texts = [texts]
 
@@ -115,7 +115,11 @@ def Phonemize(texts: Union[str, List[str]], language: str, chunk: int= 5000):
         texts = [expand_abbreviations(text) for text in texts]
 
     pronunciations = []
-    for index in tqdm(range(0, len(texts), chunk), desc= 'Phonemize'):
+    indices = range(0, len(texts), chunk)
+    if use_tqdm:
+        indices = tqdm(indices, desc= 'Phonemize')
+
+    for index in indices:
         pronunciations_chunk = _phonemize(
             backend= phonemizer_dict[language],
             text= texts[index:index + chunk],
@@ -150,6 +154,8 @@ async def Read_audio_and_F0(path: str, sample_rate: int, hop_size: int, f0_min: 
         audio = vad.apply_vad(audio[None])[0]
 
         audio = audio[:audio.shape[0] - (audio.shape[0] % hop_size)]
+        if audio.shape[0] == 0:
+            return None, None, None
 
         f0 = rapt(
             x= audio * 32768,
@@ -185,6 +191,15 @@ async def Pattern_Generate(
         ]
     results = await asyncio.gather(*tasks)
     audios, audio_lengths, f0s = zip(*results)
+    is_valid_list = [
+        not audio is None
+        for audio in audios
+        ]
+    paths, audios, audio_lengths, f0s = zip(*[
+        (path, audio, audio_length, f0)
+        for path, audio, audio_length, f0 in zip(paths, audios, audio_lengths, f0s)
+        if not audio is None
+        ])
     latent_lengths: List[int] = [length // hop_size for length in audio_lengths]
 
     audios_tensor = torch.from_numpy(Audio_Stack(audios, max_length= max(audio_lengths))).to(device).float()
@@ -235,8 +250,23 @@ async def Pattern_Generate(
         latents_trim.append(latent.astype(np.int16))
         mels_trim.append(mel.astype(np.float16))
         f0s_trim.append(f0.astype(np.float16))
+
+    latents: List[np.ndarray] = []
+    mels: List[np.ndarray] = []
+    f0s: List[np.ndarray] = []
+    current_index = 0
+    for is_valid in is_valid_list:
+        if is_valid:
+            latents.append(latents_trim[current_index])
+            mels.append(mels_trim[current_index])
+            f0s.append(f0s_trim[current_index])
+            current_index += 1
+        else:
+            latents.append(None)
+            mels.append(None)
+            f0s.append(None)
     
-    return latents_trim, mels_trim, f0s_trim
+    return latents, mels, f0s
 
 def Pattern_File_Generate(
     paths: List[str],
@@ -845,7 +875,7 @@ def Libri_Info_Load(path: str, n_sample_by_speaker: Optional[int]= None):
             text_dict_sample[path] = text_dict[path]
             speaker_dict_sample[path] = speaker_dict[path]
             n_sample_by_speaker_dict[speaker] += 1
-        paths_sample = paths
+        paths = paths_sample
         text_dict = text_dict_sample
         speaker_dict = speaker_dict_sample
 
@@ -1363,3 +1393,4 @@ if __name__ == '__main__':
 # python Pattern_Generator.py -hp Hyper_Parameters.yaml -mls D:\Rawdata\mls_english_opus -sample 100
 # python Pattern_Generator.py -hp Hyper_Parameters.yaml -libri D:\Rawdata\LibriTTS
 # python Pattern_Generator.py -hp Hyper_Parameters.yaml -aihub "E:/014.다화자 음성합성 데이터/01.데이터/2.Validation" -sample 100
+# python Pattern_Generator.py -hp Hyper_Parameters.yaml -selvas D:/Rawdata/Selvas
