@@ -195,11 +195,14 @@ async def Pattern_Generate(
         not audio is None
         for audio in audios
         ]
-    paths, audios, audio_lengths, f0s = zip(*[
+    valid_patterns = [
         (path, audio, audio_length, f0)
         for path, audio, audio_length, f0 in zip(paths, audios, audio_lengths, f0s)
         if not audio is None
-        ])
+        ]
+    if len(valid_patterns) == 0:
+        return [None] * len(paths), [None] * len(paths), [None] * len(paths)
+    paths, audios, audio_lengths, f0s = zip(*valid_patterns)
     latent_lengths: List[int] = [length // hop_size for length in audio_lengths]
 
     audios_tensor = torch.from_numpy(Audio_Stack(audios, max_length= max(audio_lengths))).to(device).float()
@@ -351,6 +354,19 @@ def Selvas_Info_Load(path: str):
     lmy, ava, avb, avc, avd, ada, adb, adc, add:
     all neutral
     '''
+    if os.path.exists('Selvas_Load.pickle'):
+        pickled_info_dict = pickle.load(open('Selvas_Load.pickle', 'rb'))
+        paths = pickled_info_dict['Paths']
+        text_dict = pickled_info_dict['Text_Dict']
+        pronunciation_dict = pickled_info_dict['Pronunciation_Dict']
+        speaker_dict = pickled_info_dict['Speaker_Dict']
+        emotion_dict = pickled_info_dict['Emotion_Dict']
+        language_dict = pickled_info_dict['Language_Dict']
+        gender_dict = pickled_info_dict['Gender_Dict']
+        
+        print(f'Selvas info generated: {len(paths)}')
+        return paths, text_dict, pronunciation_dict, speaker_dict, emotion_dict, language_dict, gender_dict
+    
     paths = []
     for root, _, files in os.walk(path):
         for file in files:
@@ -454,12 +470,35 @@ def Selvas_Info_Load(path: str):
         }
 
     print(f'Selvas info generated: {len(paths)}')
+    with open('Selvas_Load.pickle', 'wb') as f:
+        pickle.dump({
+            'Paths': paths,
+            'Text_Dict': text_dict,
+            'Pronunciation_Dict': pronunciation_dict,
+            'Speaker_Dict': speaker_dict,
+            'Emotion_Dict': emotion_dict,
+            'Language_Dict': language_dict,
+            'Gender_Dict': gender_dict
+            }, f, protocol= 4)
     return paths, text_dict, pronunciation_dict, speaker_dict, emotion_dict, language_dict, gender_dict
 
 def KSS_Info_Load(path: str):
     '''
     all neutral
     '''
+    if os.path.exists('KSS_Load.pickle'):
+        pickled_info_dict = pickle.load(open('KSS_Load.pickle', 'rb'))
+        paths = pickled_info_dict['Paths']
+        text_dict = pickled_info_dict['Text_Dict']
+        pronunciation_dict = pickled_info_dict['Pronunciation_Dict']
+        speaker_dict = pickled_info_dict['Speaker_Dict']
+        emotion_dict = pickled_info_dict['Emotion_Dict']
+        language_dict = pickled_info_dict['Language_Dict']
+        gender_dict = pickled_info_dict['Gender_Dict']
+        
+        print(f'KSS info generated: {len(paths)}')
+        return paths, text_dict, pronunciation_dict, speaker_dict, emotion_dict, language_dict, gender_dict
+
     paths, text_dict = [], {}
     for line in open(os.path.join(path, 'transcript.v.1.4.txt').replace('\\', '/'), 'r', encoding= 'utf-8-sig').readlines():
         line = line.strip().split('|')
@@ -496,6 +535,16 @@ def KSS_Info_Load(path: str):
         }
 
     print(f'KSS info generated: {len(paths)}')
+    with open('KSS_Load.pickle', 'wb') as f:
+        pickle.dump({
+            'Paths': paths,
+            'Text_Dict': text_dict,
+            'Pronunciation_Dict': pronunciation_dict,
+            'Speaker_Dict': speaker_dict,
+            'Emotion_Dict': emotion_dict,
+            'Language_Dict': language_dict,
+            'Gender_Dict': gender_dict
+            }, f, protocol= 4)
     return paths, text_dict, pronunciation_dict, speaker_dict, emotion_dict, language_dict, gender_dict
 
 def AIHub_Info_Load(path: str, n_sample_by_speaker: Optional[int]= None):
@@ -608,6 +657,19 @@ def Basic_Info_Load(
     language: The language of dataset or speaker. When dataset is multi language, this parameter is dictionary that key and value are speaker and language, resplectly.
     gender: The gender of dataset or speaker. When dataset is multi language, this parameter is dictionary that key and value are speaker and gender, resplectly.
     '''
+    if os.path.exists(f'{dataset_label}_Load.pickle'):
+        pickled_info_dict = pickle.load(open(f'{dataset_label}_Load.pickle', 'rb'))
+        paths = pickled_info_dict['Paths']
+        text_dict = pickled_info_dict['Text_Dict']
+        pronunciation_dict = pickled_info_dict['Pronunciation_Dict']
+        speaker_dict = pickled_info_dict['Speaker_Dict']
+        emotion_dict = pickled_info_dict['Emotion_Dict']
+        language_dict = pickled_info_dict['Language_Dict']
+        gender_dict = pickled_info_dict['Gender_Dict']
+        
+        print(f'{dataset_label} info generated: {len(paths)}')
+        return paths, text_dict, pronunciation_dict, speaker_dict, emotion_dict, language_dict, gender_dict
+    
     paths = []
     for root, _, files in os.walk(path):
         for file in files:
@@ -665,6 +727,16 @@ def Basic_Info_Load(
             })
 
     print(f'{dataset_label} info generated: {len(paths)}')
+    with open(f'{dataset_label}_Load.pickle', 'wb') as f:
+        pickle.dump({
+            'Paths': paths,
+            'Text_Dict': text_dict,
+            'Pronunciation_Dict': pronunciation_dict,
+            'Speaker_Dict': speaker_dict,
+            'Emotion_Dict': emotion_dict,
+            'Language_Dict': language_dict,
+            'Gender_Dict': gender_dict
+            }, f, protocol= 4)
     return paths, text_dict, pronunciation_dict, speaker_dict, emotion_dict, language_dict, gender_dict
 
 
@@ -672,6 +744,19 @@ def VCTK_Info_Load(path: str):
     '''
     VCTK v0.92 is distributed as flac files.
     '''
+    if os.path.exists('VCTK_Load.pickle'):
+        pickled_info_dict = pickle.load(open('VCTK_Load.pickle', 'rb'))
+        paths = pickled_info_dict['Paths']
+        text_dict = pickled_info_dict['Text_Dict']
+        pronunciation_dict = pickled_info_dict['Pronunciation_Dict']
+        speaker_dict = pickled_info_dict['Speaker_Dict']
+        emotion_dict = pickled_info_dict['Emotion_Dict']
+        language_dict = pickled_info_dict['Language_Dict']
+        gender_dict = pickled_info_dict['Gender_Dict']
+        
+        print(f'VCTK info generated: {len(paths)}')
+        return paths, text_dict, pronunciation_dict, speaker_dict, emotion_dict, language_dict, gender_dict
+    
     path = os.path.join(path, 'wav48').replace('\\', '/')
     
     paths = []
@@ -827,7 +912,16 @@ def VCTK_Info_Load(path: str):
         }
 
     print(f'VCTK info generated: {len(paths)}')
-
+    with open('VCTK_Load.pickle', 'wb') as f:
+        pickle.dump({
+            'Paths': paths,
+            'Text_Dict': text_dict,
+            'Pronunciation_Dict': pronunciation_dict,
+            'Speaker_Dict': speaker_dict,
+            'Emotion_Dict': emotion_dict,
+            'Language_Dict': language_dict,
+            'Gender_Dict': gender_dict
+            }, f, protocol= 4)
     return paths, text_dict, pronunciation_dict, speaker_dict, emotion_dict, language_dict, gender_dict
 
 def Libri_Info_Load(path: str, n_sample_by_speaker: Optional[int]= None):
@@ -917,6 +1011,19 @@ def Libri_Info_Load(path: str, n_sample_by_speaker: Optional[int]= None):
     return paths, text_dict, pronunciation_dict, speaker_dict, emotion_dict, language_dict, gender_dict
 
 def LJ_Info_Load(path: str):
+    if os.path.exists('LJ_Load.pickle'):
+        pickled_info_dict = pickle.load(open('LJ_Load.pickle', 'rb'))
+        paths = pickled_info_dict['Paths']
+        text_dict = pickled_info_dict['Text_Dict']
+        pronunciation_dict = pickled_info_dict['Pronunciation_Dict']
+        speaker_dict = pickled_info_dict['Speaker_Dict']
+        emotion_dict = pickled_info_dict['Emotion_Dict']
+        language_dict = pickled_info_dict['Language_Dict']
+        gender_dict = pickled_info_dict['Gender_Dict']
+        
+        print(f'LJ info generated: {len(paths)}')
+        return paths, text_dict, pronunciation_dict, speaker_dict, emotion_dict, language_dict, gender_dict
+
     paths = []
     for root, _, files in os.walk(path):
         for file in files:
@@ -952,6 +1059,16 @@ def LJ_Info_Load(path: str):
     gender_dict = {path: 'Female' for path in paths}
 
     print(f'LJ info generated: {len(paths)}')
+    with open('LJ_Load.pickle', 'wb') as f:
+        pickle.dump({
+            'Paths': paths,
+            'Text_Dict': text_dict,
+            'Pronunciation_Dict': pronunciation_dict,
+            'Speaker_Dict': speaker_dict,
+            'Emotion_Dict': emotion_dict,
+            'Language_Dict': language_dict,
+            'Gender_Dict': gender_dict
+            }, f, protocol= 4)
     return paths, text_dict, pronunciation_dict, speaker_dict, emotion_dict, language_dict, gender_dict
 
 def MLS_Info_Load(path: str, n_sample_by_speaker: Optional[int]= None):

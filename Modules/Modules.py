@@ -534,14 +534,16 @@ class Variance_Predictor(torch.nn.Module):
     def forward(
         self,
         encodings: torch.Tensor,
-        lengths: torch.Tensor,
         speech_prompts: torch.Tensor,
+        lengths: Optional[torch.Tensor]= None,
         ) -> torch.Tensor:
         '''
         encodings: [Batch, Enc_d, Enc_t or Feature_t]
         speech_prompts: [Batch, Enc_d, Prompt_t]
         '''
-        masks = (~Mask_Generate(lengths= lengths, max_length= torch.ones_like(encodings[0, 0]).sum())).unsqueeze(1).float()   # float mask, [Batch, 1, Enc_t]
+        masks = 1.0
+        if not lengths is None:
+            masks = (~Mask_Generate(lengths= lengths, max_length= torch.ones_like(encodings[0, 0]).sum())).unsqueeze(1).float()   # float mask, [Batch, 1, Enc_t]
         x = encodings
 
         for conv_blocks, attention in zip(self.conv_blocks, self.attentions):
@@ -578,8 +580,8 @@ class Duration_Predictor(Variance_Predictor):
     def forward(
         self,
         encodings: torch.Tensor,
-        lengths: torch.Tensor,
-        speech_prompts: torch.Tensor
+        speech_prompts: torch.Tensor,
+        lengths: Optional[torch.Tensor]= None,
         ) -> torch.Tensor:
         '''
         encodings: [Batch, Enc_d, Enc_t or Feature_t]

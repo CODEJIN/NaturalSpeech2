@@ -6,6 +6,7 @@
 /vits
 /inference_wav
 /wandb
+/POT_Test
 *.pyc
 
 /Modules/monotonic_align/__pycache__

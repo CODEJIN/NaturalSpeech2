@@ -145,7 +145,7 @@ class Diffusion(torch.nn.Module):
         eta: float= 0.0,
         temperature: Optional[float]= 1.2 ** 2
         ):
-        ddim_steps = torch.arange(0, self.hp.Diffusion.Max_Step, self.hp.Diffusion.Max_Step // ddim_steps).long().flip(dims= [0])        
+        ddim_steps = torch.arange(0, self.hp.Diffusion.Max_Step, self.hp.Diffusion.Max_Step // ddim_steps).long().flip(dims= [0])
         sigmas = eta * ((1 - self.alphas_cumprod_prev) / (1 - self.alphas_cumprod) * (1 - self.alphas_cumprod / self.alphas_cumprod_prev)).sqrt()
 
         features = torch.randn(
