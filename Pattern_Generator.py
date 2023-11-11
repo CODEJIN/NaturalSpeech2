@@ -1,7 +1,6 @@
 import torch
 import numpy as np
 import yaml, os, pickle, librosa, re, argparse, math, logging, sys, asyncio, json
-from vad import EnergyVAD
 from concurrent.futures import ThreadPoolExecutor as PE
 from random import shuffle
 from tqdm import tqdm
@@ -58,8 +57,7 @@ if __name__ == '__main__':
         ckpt_path= './hificodec/HiFi-Codec-24k-320d',
         with_encoder= True
         ).to(device)
-    vad = EnergyVAD(sample_rate= 22050, energy_threshold= 0.05)
-
+    
 def Text_Filtering(text: str):
     remove_letter_list = ['(', ')', '\"', '[', ']', ':', ';']
     replace_list = [('  ', ' '), (' ,', ','), ('\' ', '\''), ('“', ''), ('”', ''), ('’', '\'')]
@@ -151,7 +149,6 @@ async def Read_audio_and_F0(path: str, sample_rate: int, hop_size: int, f0_min: 
     def Read():
         audio, _ = librosa.load(path, sr=sample_rate)
         audio = librosa.util.normalize(audio) * 0.95
-        audio = vad.apply_vad(audio[None])[0]
 
         audio = audio[:audio.shape[0] - (audio.shape[0] % hop_size)]
         if audio.shape[0] == 0:
@@ -165,6 +162,15 @@ async def Read_audio_and_F0(path: str, sample_rate: int, hop_size: int, f0_min: 
             max= f0_max,
             otype= 1
             )
+        
+        nonsilence_frames = np.where(f0 > 0.0)[0]
+        if len(nonsilence_frames) < 2:
+            return None, None, None
+        initial_silence_frame, *_, last_silence_frame = nonsilence_frames
+        initial_silence_frame = max(initial_silence_frame - 21, 0)
+        last_silence_frame = min(last_silence_frame + 21, f0.shape[0])
+        audio = audio[initial_silence_frame * hop_size:last_silence_frame * hop_size]
+        f0 = f0[initial_silence_frame:last_silence_frame]
     
         return audio, audio.shape[0], f0
     
