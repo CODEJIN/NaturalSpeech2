@@ -23,3 +23,5 @@ Modules/Stochastic_Duration_Predictor.py
 Train.py
 hificodec/HiFi-Codec-24k-320d
 *.png
+/3000K_Test
+/VCTK_Test

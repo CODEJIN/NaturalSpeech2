@@ -116,7 +116,7 @@ Train:
         Epsilon: 1.0e-7
     Accumulated_Gradient_Step: 1 # 25
     Gradient_Norm: 0.0
-    Max_Step: 1000000
+    Max_Step: 5000000
     Checkpoint_Save_Interval: 5000
     Logging_Interval: 1
     Evaluation_Interval: 1000
@@ -140,16 +140,16 @@ Train:
 
 Inference_Batch_Size: 16
 
-Inference_Path: './results/VCTK_230909/Inference'
-Checkpoint_Path: './results/VCTK_230909/Checkpoint'
-Log_Path: './results/VCTK_230909/Log'
+Inference_Path: './results/VCTK_240107/Inference'
+Checkpoint_Path: './results/VCTK_240107/Checkpoint'
+Log_Path: './results/VCTK_240107/Log'
 
 Weights_and_Biases:
     # Use: true
     Use: false
     Project: 'NaturalSpeech2'
     Entity: 'codejin'
-    Name: 'VCTK_230909'
+    Name: 'VCTK_240107'
     Save_Checkpoint:
         Use: false
         Interval: 50000 # Unlike local, The capacity of WandB is small.

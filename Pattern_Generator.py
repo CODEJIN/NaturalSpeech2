@@ -1519,7 +1519,7 @@ if __name__ == '__main__':
 
 # python Pattern_Generator.py -hp Hyper_Parameters.yaml -lj D:\Rawdata\LJSpeech
 # python Pattern_Generator.py -hp Hyper_Parameters.yaml -vctk D:\Rawdata\VCTK092
-# python Pattern_Generator.py -hp Hyper_Parameters.yaml -mls D:\Rawdata\mls_english_opus -sample 100
+# python Pattern_Generator.py -hp Hyper_Parameters.yaml -mls D:\Rawdata\mls_english_opus
 # python Pattern_Generator.py -hp Hyper_Parameters.yaml -libri D:\Rawdata\LibriTTS
 # python Pattern_Generator.py -hp Hyper_Parameters.yaml -aihub "E:/014.다화자 음성합성 데이터/01.데이터/2.Validation" -sample 100
 # python Pattern_Generator.py -hp Hyper_Parameters.yaml -selvas D:/Rawdata/Selvas

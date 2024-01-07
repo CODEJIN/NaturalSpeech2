@@ -1,4 +1,4 @@
-# NaturalSpeech 2 (WIP)
+# NaturalSpeech 2
 
 * This code is a unofficial implementation of NaturalSpeech 2.
 * The algorithm is based on the following paper:
@@ -24,9 +24,9 @@ Shen, K., Ju, Z., Tan, X., Liu, Y., Leng, Y., He, L., ... & Bian, J. (2023). Nat
     * The `σ` = 3, 5, and 10 seconds used in the evaluation of paper are too long to apply to both the variance predictor and diffusion during training.
     * To ensure stability in pattern usage, half the length of the shortest pattern used in each training is set as `σ` for each training.
 * The target duration is obtained through `Alignment learning framework (ALF)`, rather than being brought in externally.
-    * Using external modules such as Montreal Force Alignment (MFA) may have benefits in terms of training speed or stability, but I prioritized simplifying the training process.    
+    * Using external modules such as Montreal Force Alignment (MFA) may have benefits in terms of training speed or stability, but I prioritized simplifying the training process.
 * Padding is applied between tokens like `'A <P> B <P> C ....'`
-    * I could not verify whether there was a difference in performance depending on its usage.    
+    * I could not verify whether there was a difference in performance depending on its usage.
 
 
 # Supported dataset
@@ -132,5 +132,17 @@ CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 OMP_NUM_THREADS=32 python -m torch.distribu
 
 * I recommend to check the [multi_gpu.sh](./multi_gpu.sh).
 
-# TODO
-* Verification
+# Checkpoint
+| Dataset | | SR    | | Link                                                                                                   |
+|---------|-|-------|-|--------------------------------------------------------------------------------------------------------|
+| VCTK    | | 22050 | | [Google drive](https://drive.google.com/file/d/14liWa35kzXMQyp1o6AgXR_KE3VWr6Kzm/view?usp=drive_link)  |
+
+* This checkpoint was trained in a single GPU environment (RTX4090 x 1) with the VCTK dataset.
+* It has limited quality compared to the official demo, and there are issues with the generation for unseen reference.
+* While checking the loss flow, I observed the possibility of loss decreasing as training progresses, but it doesn't guarantee an improvement in quality.
+* Unfortunately, I don't have personal resources for testing beyond the current state, so I'm releasing the checkpoint after discontinuation.
+
+
+
+
+
